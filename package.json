@@ -1,0 +1,17 @@
+{
+  "name": "notebook-filter",
+  "version": "1.0.0",
+  "description": "Extension de Chrome/Edge que filtra herramientas de estudio de NotebookLM por tipo y fuente.",
+  "private": true,
+  "main": "background.js",
+  "scripts": {
+    "test": "node --test filter-core.test.js content.dom.test.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "devDependencies": {
+    "jsdom": "^29.1.1"
+  }
+}

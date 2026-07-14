@@ -466,6 +466,24 @@ function ingestBatchResponse(text) {
   }
 }
 
+// Registra una clave tipo "T064" para sourceId aunque nunca lleguemos a
+// conocer el titulo real de la fuente ("064.md"). NotebookLM parece cargar
+// el listado de fuentes de forma distinta a como carga los artefactos del
+// Studio (posiblemente ya incrustado en el HTML inicial en vez de via una
+// llamada batchexecute interceptable), por lo que sourceTitleById puede
+// quedarse vacio para una fuente aunque su UUID SI llegue correctamente
+// enlazado desde una fila de artefacto. En ese caso, el propio titulo del
+// artefacto ("T064 - Audio - Test") ya contiene el numero de tema, asi que
+// lo usamos como fuente adicional (no exclusiva) de la clave.
+function deriveSourceKeyFromArtifactTitle(title, sourceIds) {
+  if (!title || !sourceIds || !sourceIds.length) return;
+  extractSourceKeysFromText(title).forEach((key) => {
+    if (!sourceKeyToIds.has(key)) sourceKeyToIds.set(key, new Set());
+    const ids = sourceKeyToIds.get(key);
+    sourceIds.forEach((sourceId) => ids.add(sourceId));
+  });
+}
+
 function ingestBridgePayload(payload) {
   if (!payload || typeof payload !== 'object') return;
 
@@ -477,6 +495,7 @@ function ingestBridgePayload(payload) {
   (payload.artifacts || []).forEach((artifact) => {
     if (!artifact || !isUuid(artifact.id)) return;
     artifactOrder.push(artifact.id);
+    deriveSourceKeyFromArtifactTitle(artifact.title, artifact.sourceIds);
     artifactMetaCache.set(artifact.id, {
       kind: typeCodeToKind(artifact.typeCode),
       sourceIds: artifact.sourceIds || [],
@@ -626,18 +645,18 @@ function getArtifactKind(item) {
   const detailsKind = kindFromDetails(getDetails(item));
   if (detailsKind) return detailsKind;
 
-  const artifactId = getArtifactId(item);
-  const cached = artifactId ? artifactMetaCache.get(artifactId) : null;
-  if (cached?.kind) {
-    if (cached.typeCode === 4) {
-      const iconKind = kindFromIcon(item);
-      if (iconKind === 'cards' || iconKind === 'quiz') return iconKind;
-    }
-    return cached.kind;
-  }
-
+  // El icono (y el boton de reproducir para audio) es una senal que la
+  // propia UI de NotebookLM renderiza a partir del tipo real, y no depende
+  // de que hayamos interpretado correctamente el campo numerico "typeCode"
+  // de la respuesta batchexecute (una suposicion nuestra, nunca verificada
+  // contra una captura de red real). Se prioriza sobre la cache de la RPC;
+  // esta solo se usa como ultimo recurso si el icono no da una respuesta.
   const iconKind = kindFromIcon(item);
   if (iconKind) return iconKind;
+
+  const artifactId = getArtifactId(item);
+  const cached = artifactId ? artifactMetaCache.get(artifactId) : null;
+  if (cached?.kind) return cached.kind;
 
   return 'other';
 }
@@ -742,9 +761,18 @@ function getAllSources(items) {
 }
 
 function getArtifactItems(root) {
-  if (!root) return [];
-  const inRoot = Array.from(root.querySelectorAll('artifact-library-item'));
-  if (inRoot.length) return inRoot;
+  // "root" es opcional: linkDomArtifactsToMetadata() lo llama sin
+  // argumento a proposito (necesita TODOS los items del documento, no solo
+  // los de un panel concreto). Antes, "if (!root) return [];" hacia que
+  // esa llamada devolviese siempre 0 elementos, por lo que dataset.
+  // nlArtifactId nunca se rellenaba y getArtifactId() se quedaba sin la via
+  // mas fiable para enlazar el DOM con los metadatos capturados via RPC
+  // (typeCode real, sourceIds) -- de ahi que el filtrado por tipo y por
+  // fuente pareciera no hacer nada.
+  if (root) {
+    const inRoot = Array.from(root.querySelectorAll('artifact-library-item'));
+    if (inRoot.length) return inRoot;
+  }
   return Array.from(document.querySelectorAll('artifact-library-item'));
 }
 
@@ -1193,11 +1221,21 @@ window.__nlFilterDebug = function () {
     typeCode: meta.typeCode,
     sourceIds: (meta.sourceIds || []).join(', '),
     sourceKeys: Array.from(meta.sourceKeys || []).join(', '),
+    domLinked: Array.from(document.querySelectorAll('artifact-library-item'))
+      .some((item) => item.dataset.nlArtifactId === id),
   }));
+  const container = document.getElementById('nl-filter-panel');
+  const activeFilters = container ? readPressedFilters(container) : { pressedStudy: {}, pressedSource: {} };
+  const activeTypes = Object.keys(activeFilters.pressedStudy).filter((k) => activeFilters.pressedStudy[k]);
+  const activeSourceChips = Object.keys(activeFilters.pressedSource).filter((k) => activeFilters.pressedSource[k]);
   console.log('[NL Filter] fuentes capturadas:', sources.length, '| artefactos capturados:', artifacts.length);
+  console.log('[NL Filter] tipos activos:', activeTypes.join(', ') || '(ninguno)');
+  console.log('[NL Filter] fuentes activas (chips):', activeSourceChips.join(', ') || '(ninguna)');
+  console.log('[NL Filter] busqueda texto:', JSON.stringify(searchText), '| busqueda fuente:', JSON.stringify(sourceSearchText));
+  console.log('[NL Filter] items del DOM sin enlazar a metadatos:', Array.from(document.querySelectorAll('artifact-library-item')).filter((item) => !item.dataset.nlArtifactId).length);
   console.table(sources);
   console.table(artifacts);
-  return { sources, artifacts };
+  return { sources, artifacts, activeTypes, activeSourceChips, searchText, sourceSearchText };
 };
 
 function main() {
