@@ -1,0 +1,41 @@
+{
+  "manifest_version": 3,
+  "name": "Filtro de Estudio para NotebookLM",
+  "version": "0.1.1",
+  "description": "Filtra tipos de estudio y fuentes en NotebookLM sin romper la SPA.",
+  "permissions": ["storage", "activeTab"],
+  "host_permissions": [
+    "https://notebooklm.google.com/*",
+    "https://accounts.google.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["https://notebooklm.google.com/*"],
+      "js": ["filter-core.js", "page-bridge.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["https://notebooklm.google.com/*"],
+      "js": ["filter-core.js", "content.js"],
+      "run_at": "document_start"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "icons": {
+    "16": "icon16.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["icon16.png", "icon48.png", "icon128.png"],
+      "matches": ["https://notebooklm.google.com/*"]
+    }
+  ]
+}

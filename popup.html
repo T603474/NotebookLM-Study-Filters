@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Filtro de Estudio</title>
+  <style>
+    body {
+      font-family: 'Google Sans', Roboto, Arial, sans-serif;
+      width: 220px;
+      margin: 0;
+      padding: 10px;
+      color: #e8eaed;
+      background: #202124;
+    }
+    .row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 8px;
+    }
+    button {
+      appearance: none;
+      border: 1px solid #8ab4f8;
+      background: transparent;
+      color: #e8eaed;
+      padding: 4px 8px;
+      border-radius: 16px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    button[aria-pressed="true"] {
+      background: #8ab4f8;
+      color: #202124;
+      border-color: #8ab4f8;
+    }
+  </style>
+</head>
+<body>
+  <div id="status">Filtro activo</div>
+  <div class="row" id="studyTypes"></div>
+  <div class="row" id="sourceTypes"></div>
+  <script src="popup.js"></script>
+</body>
+</html>
