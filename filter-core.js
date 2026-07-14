@@ -21,6 +21,17 @@
     return match ? normalizeSourceQuery(match[1]) : '';
   }
 
+  // Se dispara cuando la extension se recarga/actualiza sin refrescar la
+  // pestana de NotebookLM: el content script queda "huerfano" y cualquier
+  // llamada real a chrome.* (o el propio motor de extensiones de forma
+  // asincrona) lanza este error concreto. No es un bug de la logica de
+  // filtrado; content.js lo usa para desactivarse limpiamente en vez de
+  // dejar que ensucie el panel de "Errores" de la extension.
+  function isContextInvalidatedError(err) {
+    const message = (err && err.message) ? String(err.message) : String(err || '');
+    return message.includes('Extension context invalidated');
+  }
+
   function normalizeText(value) {
     return String(value || '')
       .normalize('NFD')
@@ -212,6 +223,7 @@
 
   return {
     isUuid,
+    isContextInvalidatedError,
     normalizeSourceQuery,
     sourceKeyFromTitle,
     matchesSourceQuery,

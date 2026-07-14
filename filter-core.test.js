@@ -8,8 +8,18 @@ const {
   buildArtifactSourceOptions,
   artifactMatchesFilters,
   mergeMetadataSnapshot,
+  isContextInvalidatedError,
   SOURCE_ID_PREFIX,
 } = require('./filter-core');
+
+test('recognizes "Extension context invalidated" regardless of how the error arrives', () => {
+  assert.equal(isContextInvalidatedError(new Error('Extension context invalidated.')), true);
+  assert.equal(isContextInvalidatedError({ message: 'Extension context invalidated.' }), true);
+  assert.equal(isContextInvalidatedError('Extension context invalidated.'), true);
+  assert.equal(isContextInvalidatedError(new Error('Cannot read properties of null')), false);
+  assert.equal(isContextInvalidatedError(null), false);
+  assert.equal(isContextInvalidatedError(undefined), false);
+});
 
 test('a source query with trailing punctuation does not match everything', () => {
   assert.equal(normalizeSourceQuery('047.'), 'T047');

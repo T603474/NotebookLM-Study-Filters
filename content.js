@@ -5,7 +5,10 @@ const ALL_TYPES_KEY = '__all__';
 const DEFAULT_STUDY_TYPES = ['audio', 'briefing', 'guide', 'map', 'quiz', 'cards', 'video', 'report', 'presentation', 'infographic', 'datatable'];
 const FILTER_CORE = globalThis.NotebookFilterCore;
 
+let extensionContextLost = false;
+
 function hasValidExtensionContext() {
+  if (extensionContextLost) return false;
   try {
     return typeof chrome !== 'undefined' && Boolean(chrome.runtime?.id);
   } catch {
@@ -22,6 +25,57 @@ function getExtensionVersion() {
 }
 
 const EXTENSION_VERSION = getExtensionVersion();
+
+// Si la extension se recarga/actualiza desde edge://extensions sin refrescar
+// la pestana de NotebookLM, esta instancia del content script queda "huerfana":
+// chrome.runtime sigue existiendo como objeto pero cualquier llamada real lanza
+// "Extension context invalidated". El motor de extensiones puede emitir ese
+// error de forma asincrona (promesa no controlada) aunque el codigo que lo
+// origina ya este protegido con try/catch. En vez de dejar que ensucie el
+// panel de "Errores", lo detectamos aqui, lo silenciamos y desactivamos esta
+// instancia de forma limpia (sin timers ni observers activos de por vida).
+function isContextInvalidatedError(err) {
+  if (FILTER_CORE) return FILTER_CORE.isContextInvalidatedError(err);
+  const message = (err && err.message) ? String(err.message) : String(err || '');
+  return message.includes('Extension context invalidated');
+}
+
+function teardownExtension() {
+  if (extensionContextLost) return;
+  extensionContextLost = true;
+  if (scanObserver) {
+    scanObserver.disconnect();
+    scanObserver = null;
+  }
+  if (initRetryTimer) {
+    clearInterval(initRetryTimer);
+    initRetryTimer = null;
+  }
+  cleanupFilterPanel();
+  console.info('[Filtro de Estudio] Extension recargada: refresca esta pestana para reactivar el filtro.');
+}
+
+function handleRunOnceFailure(err) {
+  if (isContextInvalidatedError(err)) {
+    teardownExtension();
+    return;
+  }
+  console.error('[Filtro de Estudio] Error inesperado en runOnce:', err);
+}
+
+window.addEventListener('error', (event) => {
+  if (isContextInvalidatedError(event.error)) {
+    event.preventDefault();
+    teardownExtension();
+  }
+});
+
+window.addEventListener('unhandledrejection', (event) => {
+  if (isContextInvalidatedError(event.reason)) {
+    event.preventDefault();
+    teardownExtension();
+  }
+});
 
 const TYPE_LABELS = {
   [ALL_TYPES_KEY]: 'Todos',
@@ -1053,6 +1107,7 @@ let sourceSearchText = '';
 let cachedStudyTypesKey = '';
 let cachedSourceTypesKey = '';
 let initRetryTimer = null;
+let scanObserver = null;
 
 let scanScheduled = false;
 function scheduleScan() {
@@ -1060,7 +1115,7 @@ function scheduleScan() {
   scanScheduled = true;
   requestAnimationFrame(() => {
     scanScheduled = false;
-    runOnce();
+    runOnce().catch(handleRunOnceFailure);
   });
 }
 
@@ -1071,8 +1126,8 @@ function initObserver() {
   sentinel.style.display = 'none';
   document.documentElement.appendChild(sentinel);
 
-  const observer = new MutationObserver(() => scheduleScan());
-  observer.observe(document.documentElement, { childList: true, subtree: true });
+  scanObserver = new MutationObserver(() => scheduleScan());
+  scanObserver.observe(document.documentElement, { childList: true, subtree: true });
 }
 
 function startInitRetries() {
@@ -1092,7 +1147,7 @@ function startInitRetries() {
       initRetryTimer = null;
       return;
     }
-    runOnce();
+    runOnce().catch(handleRunOnceFailure);
   }, 500);
 }
 
@@ -1149,7 +1204,7 @@ function main() {
   if (location.hostname !== PAGE_HOST) return;
   handleBridgeMetadata();
   initObserver();
-  runOnce();
+  runOnce().catch(handleRunOnceFailure);
   startInitRetries();
 }
 
