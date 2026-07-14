@@ -1,5 +1,10 @@
 // === NotebookLM Filter Debugger ===
 (function() {
+  if (typeof window.__nlFilterDebug === 'function') {
+    window.__nlFilterDebug();
+  } else {
+    console.log('[NL] __nlFilterDebug no disponible (¿estas en el contexto "top" en vez del de la extension?).');
+  }
   const panel = (typeof findStudioPanel === 'function') ? findStudioPanel() : document.querySelector('.panel-content-scrollable');
   if (!panel) {
     console.log('[NL] Panel Studio no encontrado en DOM.');

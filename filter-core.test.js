@@ -8,6 +8,7 @@ const {
   buildArtifactSourceOptions,
   artifactMatchesFilters,
   mergeMetadataSnapshot,
+  SOURCE_ID_PREFIX,
 } = require('./filter-core');
 
 test('a source query with trailing punctuation does not match everything', () => {
@@ -122,6 +123,61 @@ test('typed non-numeric source name matches artifact source metadata', () => {
       sourceQuery: 'legislacion obsoleta',
     }),
     true
+  );
+});
+
+test('a source row with a small numeric field is not misclassified as an artifact', () => {
+  const sourceId = 'ff424fd8-f9f1-4f54-9942-ebab74cd9729';
+  const artifactId = '69fc428b-94a6-4355-af48-eb6c56699ab6';
+  // Fila de fuente realista: [uuid, titulo, tipoDocumento(2), timestamp, mime].
+  // "tipoDocumento" cae en el mismo rango 1-9 que el typeCode de un
+  // artefacto, por lo que antes de exigir un UUID ajeno esta fila se
+  // clasificaba incorrectamente como artefacto y la fuente desaparecia.
+  const sourceRow = [sourceId, '047.md', 2, 1699999999, 'text/markdown'];
+  const artifactRow = [artifactId, 'T047 - Audio', 1, [[sourceId]], 3];
+  const payload = JSON.stringify([sourceRow, artifactRow]);
+  const response = `)]}'\n${JSON.stringify([
+    ['wrb.fr', 'rpc', payload, null, null, null, 'generic'],
+  ])}`;
+
+  const parsed = parseNotebookBatchResponse(response);
+
+  assert.equal(parsed.sources.get(sourceId), '047.md');
+  assert.deepEqual(parsed.artifacts, [
+    { id: artifactId, title: 'T047 - Audio', typeCode: 1, sourceIds: [sourceId] },
+  ]);
+});
+
+test('matches a source by its raw id when no key or name can be derived', () => {
+  const sourceId = 'ff424fd8-f9f1-4f54-9942-ebab74cd9729';
+  const otherId = '11111111-1111-1111-1111-111111111111';
+
+  assert.equal(matchesSourceQuery(new Set(), SOURCE_ID_PREFIX + sourceId, [], [sourceId]), true);
+  assert.equal(matchesSourceQuery(new Set(), SOURCE_ID_PREFIX + otherId, [], [sourceId]), false);
+  // Insensible a mayusculas/minusculas, ya que los UUID pueden llegar en
+  // cualquier combinacion de caja segun el origen del chip.
+  assert.equal(matchesSourceQuery(new Set(), SOURCE_ID_PREFIX + sourceId.toUpperCase(), [], [sourceId]), true);
+});
+
+test('a fallback id-based source chip still filters artifacts with unresolved titles', () => {
+  const sourceId = 'ff424fd8-f9f1-4f54-9942-ebab74cd9729';
+  const artifact = { kind: 'audio', sourceKeys: new Set(), sourceNames: [], sourceIds: [sourceId] };
+
+  assert.equal(
+    artifactMatchesFilters(artifact, {
+      activeTypes: [],
+      activeSources: [SOURCE_ID_PREFIX + sourceId],
+      sourceQuery: '',
+    }),
+    true
+  );
+  assert.equal(
+    artifactMatchesFilters(artifact, {
+      activeTypes: [],
+      activeSources: [SOURCE_ID_PREFIX + '11111111-1111-1111-1111-111111111111'],
+      sourceQuery: '',
+    }),
+    false
   );
 });
 

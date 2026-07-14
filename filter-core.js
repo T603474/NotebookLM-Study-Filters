@@ -30,9 +30,19 @@
       .trim();
   }
 
-  function matchesSourceQuery(sourceKeys, query, sourceNames) {
+  // Prefijo usado para los chips de fuente "de respaldo": cuando no se
+  // puede derivar una clave de tipo "T047" ni un nombre legible a partir
+  // del titulo de la fuente, el chip identifica la fuente por su UUID
+  // real en lugar de desaparecer del listado.
+  const SOURCE_ID_PREFIX = 'ID:';
+
+  function matchesSourceQuery(sourceKeys, query, sourceNames, sourceIds) {
     const raw = String(query || '').trim();
     if (!raw) return true;
+    if (raw.startsWith(SOURCE_ID_PREFIX)) {
+      const targetId = raw.slice(SOURCE_ID_PREFIX.length).toLowerCase();
+      return Array.from(sourceIds || []).some((id) => String(id).toLowerCase() === targetId);
+    }
     const normalized = normalizeSourceQuery(raw);
     const matchesKey = normalized
       && Array.from(sourceKeys || []).some((key) => normalizeSourceQuery(key) === normalized);
@@ -47,12 +57,13 @@
     const activeSources = filters.activeSources || [];
     const sourceKeys = artifact.sourceKeys || new Set();
     const sourceNames = artifact.sourceNames || [];
+    const sourceIds = artifact.sourceIds || [];
     const matchesType = activeTypes.length === 0
       || activeTypes.includes('__all__')
       || activeTypes.includes(artifact.kind);
     const matchesSelectedSource = activeSources.length === 0
-      || activeSources.some((source) => matchesSourceQuery(sourceKeys, source, sourceNames));
-    const matchesTypedSource = matchesSourceQuery(sourceKeys, filters.sourceQuery || '', sourceNames);
+      || activeSources.some((source) => matchesSourceQuery(sourceKeys, source, sourceNames, sourceIds));
+    const matchesTypedSource = matchesSourceQuery(sourceKeys, filters.sourceQuery || '', sourceNames, sourceIds);
     return matchesType && matchesSelectedSource && matchesTypedSource;
   }
 
@@ -66,6 +77,12 @@
     return result;
   }
 
+  function rowReferencesForeignUuid(row) {
+    const uuids = extractUuids(row, new Set());
+    uuids.delete(row[0]);
+    return uuids.size > 0;
+  }
+
   function isArtifactRow(row) {
     return Array.isArray(row)
       && row.length >= 5
@@ -73,7 +90,13 @@
       && typeof row[1] === 'string'
       && Number.isInteger(row[2])
       && row[2] >= 1
-      && row[2] <= 9;
+      && row[2] <= 9
+      // Un artefacto siempre enlaza con el UUID de al menos una fuente
+      // distinta de si mismo; una fila de metadatos de fuente no suele
+      // llevar otro UUID embebido. Esto evita que una fuente con un campo
+      // numerico pequeño (p.ej. un tipo de documento) se clasifique como
+      // artefacto y quede fuera del listado de fuentes.
+      && rowReferencesForeignUuid(row);
   }
 
   function sourceTitleFromRow(row) {
@@ -196,5 +219,6 @@
     parseNotebookBatchResponse,
     buildArtifactSourceOptions,
     mergeMetadataSnapshot,
+    SOURCE_ID_PREFIX,
   };
 });

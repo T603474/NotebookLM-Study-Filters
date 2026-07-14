@@ -180,19 +180,14 @@ function normalizeSourceKey(raw) {
 function extractSourceKeysFromText(text) {
   const keys = new Set();
   if (!text) return keys;
-  const md = String(text).match(/(?:^|\s|T?)0*(\d{2,3})\.md\b/i);
-  if (md) {
-    const key = normalizeSourceKey(md[1]);
-    if (key) keys.add(key);
-  }
+  // Delegamos en FILTER_CORE.sourceKeyFromTitle porque acepta el numero de
+  // fuente con o sin ".md" y con o sin prefijo "T" (mas laxo que las
+  // regex antiguas, que exigian literalmente ".md" o "T047").
+  const coreKey = FILTER_CORE ? FILTER_CORE.sourceKeyFromTitle(text) : '';
+  if (coreKey) keys.add(coreKey);
   const tema = String(text).match(/\btema\s*0*(\d{2,3})\b/i);
   if (tema) {
     const key = normalizeSourceKey(tema[1]);
-    if (key) keys.add(key);
-  }
-  const tPrefix = String(text).match(/\bT0*(\d{2,3})\b/i);
-  if (tPrefix) {
-    const key = normalizeSourceKey(tPrefix[0]);
     if (key) keys.add(key);
   }
   return keys;
@@ -611,6 +606,18 @@ function getArtifactSourceNames(item) {
     .filter(Boolean);
 }
 
+function getArtifactSourceIds(item) {
+  const artifactId = getArtifactId(item);
+  const cached = artifactId ? artifactMetaCache.get(artifactId) : null;
+  return (cached && cached.sourceIds) || [];
+}
+
+function sourceDisplayLabel(sourceId) {
+  const title = sourceTitleById.get(sourceId);
+  if (title) return title.replace(/\.[a-z0-9]{1,5}$/i, '');
+  return 'Fuente ' + sourceId.slice(0, 8);
+}
+
 function sourceFilterKeyMatches(activeKey, itemKeys) {
   const normalizedActive = normalizeSourceKey(activeKey.replace(/^T/i, '')) || normalizeSourceKey(activeKey);
   if (!normalizedActive) return false;
@@ -641,16 +648,35 @@ function getDisplayStudyTypes(items) {
   return [ALL_TYPES_KEY, ...Array.from(merged).filter((t) => t !== ALL_TYPES_KEY).sort()];
 }
 
+function addSourceFallbackEntries(set, sourceIds) {
+  const prefix = FILTER_CORE ? FILTER_CORE.SOURCE_ID_PREFIX : 'ID:';
+  (sourceIds || []).forEach((sourceId) => {
+    const key = prefix + sourceId;
+    if (!set.has(key)) set.set(key, sourceDisplayLabel(sourceId));
+  });
+}
+
 function getSourcesWithArtifacts(items) {
   const set = new Map();
   for (const meta of artifactMetaCache.values()) {
     const keys = meta.sourceKeys?.size ? meta.sourceKeys : sourceKeysForIds(meta.sourceIds);
-    keys.forEach((key) => set.set(key, key.replace(/^T/i, '')));
+    if (keys.size) {
+      keys.forEach((key) => set.set(key, key.replace(/^T/i, '')));
+    } else {
+      // No se pudo derivar una clave tipo "T047" del titulo de la fuente
+      // (p.ej. nombres sin numero, o titulo aun no capturado). En vez de
+      // omitir la fuente en silencio, se muestra un chip identificado por
+      // su UUID real para que siga siendo seleccionable.
+      addSourceFallbackEntries(set, meta.sourceIds);
+    }
   }
   for (const item of items) {
-    getArtifactSourceKeys(item).forEach((key) => {
-      set.set(key, key.replace(/^T/i, ''));
-    });
+    const itemKeys = getArtifactSourceKeys(item);
+    if (itemKeys.size) {
+      itemKeys.forEach((key) => set.set(key, key.replace(/^T/i, '')));
+    } else {
+      addSourceFallbackEntries(set, getArtifactSourceIds(item));
+    }
   }
   return Array.from(set.entries())
     .sort((a, b) => a[1].localeCompare(b[1], undefined, { numeric: true }))
@@ -687,9 +713,10 @@ function applyFilters(studyFilter, sourceFilter, searchText, sourceSearchText) {
     const kind = getArtifactKind(item);
     const sourceKeys = getArtifactSourceKeys(item);
     const sourceNames = getArtifactSourceNames(item);
+    const sourceIds = getArtifactSourceIds(item);
     const matchesMetadata = FILTER_CORE
       ? FILTER_CORE.artifactMatchesFilters(
-        { kind, sourceKeys, sourceNames },
+        { kind, sourceKeys, sourceNames, sourceIds },
         {
           activeTypes: activeStudyTypes,
           activeSources,
@@ -1092,6 +1119,31 @@ async function runOnce() {
 
   updateFilterPanel(studyFilter, sourceFilter);
 }
+
+// Herramienta de diagnostico invocable desde la consola de DevTools
+// (contexto de la extension/isolated world) con:
+//   __nlFilterDebug()
+// Muestra cuantas fuentes y artefactos se han capturado via batchexecute
+// y cuales quedarian como chip de respaldo por UUID en la seccion FUENTE.
+window.__nlFilterDebug = function () {
+  const sources = Array.from(sourceTitleById.entries()).map(([id, title]) => ({
+    id,
+    title,
+    key: extractSourceKeysFromText(title).size ? Array.from(extractSourceKeysFromText(title)).join(',') : '(sin clave, se usara ID)',
+  }));
+  const artifacts = Array.from(artifactMetaCache.entries()).map(([id, meta]) => ({
+    id,
+    title: meta.title,
+    kind: meta.kind,
+    typeCode: meta.typeCode,
+    sourceIds: (meta.sourceIds || []).join(', '),
+    sourceKeys: Array.from(meta.sourceKeys || []).join(', '),
+  }));
+  console.log('[NL Filter] fuentes capturadas:', sources.length, '| artefactos capturados:', artifacts.length);
+  console.table(sources);
+  console.table(artifacts);
+  return { sources, artifacts };
+};
 
 function main() {
   if (location.hostname !== PAGE_HOST) return;
