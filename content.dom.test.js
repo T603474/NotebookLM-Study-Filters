@@ -580,3 +580,26 @@ test('los chips de fuente muestran el nombre completo cuando scanSourcesPanel lo
   assert.deepEqual(labels, ['063.md', '064.md', '065.md', '066.md'],
     'los chips deben mostrar el nombre completo de la fuente (063.md), no solo el numero ni el UUID');
 });
+
+test('el contador de resultados muestra "Mostrando X de Y" al filtrar', async () => {
+  const window = loadContentScript(buildDom());
+
+  await window.runOnce();
+  dispatchBridgeMetadata(window, { sources: REAL_SOURCES, artifacts: REAL_ARTIFACTS });
+  await settle(window);
+  await window.runOnce();
+
+  const countEl = () => window.document.getElementById('nl-result-count');
+  assert.ok(countEl(), 'debe existir el elemento contador');
+
+  // Sin filtros: 6 de 6.
+  assert.equal(countEl().textContent, 'Mostrando 6 de 6',
+    'sin filtros el contador debe mostrar el total');
+
+  // Filtrar por Test (quiz): 2 visibles de 6.
+  const testChip = window.document.querySelector('[data-nl-type="quiz"]');
+  testChip.dispatchEvent(new window.Event('click', { bubbles: true, cancelable: true }));
+  await settle(window);
+  assert.equal(countEl().textContent, 'Mostrando 2 de 6',
+    'al filtrar por Test, el contador debe mostrar 2 de 6');
+});

@@ -203,6 +203,11 @@ function injectStyles() {
       align-items: center;
       color: #f1f3f4;
     }
+    .nl-result-count {
+      font-weight: 400;
+      opacity: 0.7;
+      font-size: 10px;
+    }
     .nl-filter-label {
       font-size: 10px;
       font-weight: 600;
@@ -770,12 +775,14 @@ function applyFilters(studyFilter, sourceFilter, searchText, sourceSearchText) {
   }
 
   updateEmptyState(visibleCount, activeStudyTypes.length || activeSources.length || Boolean(query) || Boolean(sourceQuery));
+  updateResultCount(visibleCount, items.length);
 }
 
 function updateEmptyState(visibleCount, hasActiveFilter) {
   const filterPanel = document.getElementById('nl-filter-panel');
   if (!filterPanel) return;
   let empty = filterPanel.querySelector('#nl-empty-state');
+  const shouldShow = visibleCount === 0 && hasActiveFilter;
   if (!empty) {
     empty = document.createElement('div');
     empty.id = 'nl-empty-state';
@@ -784,8 +791,20 @@ function updateEmptyState(visibleCount, hasActiveFilter) {
     empty.setAttribute('hidden', '');
     filterPanel.appendChild(empty);
   }
-  if (visibleCount === 0 && hasActiveFilter) empty.removeAttribute('hidden');
-  else empty.setAttribute('hidden', '');
+  // Idempotente: solo se muta si el estado cambia, para no realimentar al
+  // MutationObserver (el panel de filtros esta dentro del subarbol observado).
+  const isShown = !empty.hasAttribute('hidden');
+  if (shouldShow !== isShown) {
+    if (shouldShow) empty.removeAttribute('hidden');
+    else empty.setAttribute('hidden', '');
+  }
+}
+
+function updateResultCount(visibleCount, total) {
+  const el = document.getElementById('nl-result-count');
+  if (!el) return;
+  const newText = total > 0 ? ('Mostrando ' + visibleCount + ' de ' + total) : '';
+  if (el.textContent !== newText) el.textContent = newText;
 }
 
 function buildFilterHTML(studyTypes, selectedStudyMap, sourceTypes, selectedSourceMap) {
@@ -807,7 +826,7 @@ function buildFilterHTML(studyTypes, selectedStudyMap, sourceTypes, selectedSour
 
   return (
     '<div class="nl-filter-title">' +
-    '<span>Filtros' + (EXTENSION_VERSION ? ' · v' + EXTENSION_VERSION : '') + '</span>' +
+    '<span>Filtros' + (EXTENSION_VERSION ? ' · v' + EXTENSION_VERSION : '') + ' <span id="nl-result-count" class="nl-result-count"></span></span>' +
     '<span style="opacity:0.7;cursor:pointer;" data-nl-action="clear">Limpiar</span>' +
     '</div>' +
     '<div class="nl-filter-label">Tipo de contenido</div>' +
@@ -1171,6 +1190,26 @@ function scheduleScan() {
   });
 }
 
+function isInsideFilterPanel(node) {
+  const fp = document.getElementById('nl-filter-panel');
+  return !!(fp && node && (node === fp || fp.contains(node)));
+}
+
+// El callback del observer ignora las mutaciones que se originan dentro del
+// propio panel de filtros (#nl-filter-panel). Como ese panel vive dentro del
+// subarbol observado (esta montado en el panel de Studio), sin este filtro
+// cualquier actualizacion del panel (contador, estado vacio, aria-pressed)
+// realimentaria al observer y entraria en bucle infinito: applyFilters muta
+// el panel -> observer -> runOnce -> applyFilters -> muta el panel -> ...
+function observerCallback(records) {
+  for (const record of records) {
+    if (!isInsideFilterPanel(record.target)) {
+      scheduleScan();
+      return;
+    }
+  }
+}
+
 function initObserver() {
   if (document.getElementById('nl-observer-root')) return;
   const sentinel = document.createElement('div');
@@ -1178,7 +1217,7 @@ function initObserver() {
   sentinel.style.display = 'none';
   document.documentElement.appendChild(sentinel);
 
-  scanObserver = new MutationObserver(() => scheduleScan());
+  scanObserver = new MutationObserver(observerCallback);
   observedRoot = document.documentElement;
   scanObserver.observe(observedRoot, { childList: true, subtree: true });
 }
