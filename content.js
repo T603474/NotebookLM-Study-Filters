@@ -807,17 +807,46 @@ function updateResultCount(visibleCount, total) {
   if (el.textContent !== newText) el.textContent = newText;
 }
 
-function buildFilterHTML(studyTypes, selectedStudyMap, sourceTypes, selectedSourceMap) {
+function computeChipCounts(items, studyTypes, sourceTypes) {
+  const prefix = FILTER_CORE ? FILTER_CORE.SOURCE_ID_PREFIX : 'ID:';
+  const typeCounts = {};
+  for (const type of studyTypes) typeCounts[type] = 0;
+  const sourceCounts = {};
+  for (const entry of sourceTypes) {
+    const src = typeof entry === 'string' ? entry : entry && entry.src;
+    if (src) sourceCounts[src] = 0;
+  }
+  for (const item of items) {
+    const kind = getArtifactKind(item);
+    if (kind && typeCounts[kind] !== undefined) typeCounts[kind]++;
+    const keys = getArtifactSourceKeys(item);
+    const ids = getArtifactSourceIds(item);
+    for (const src of Object.keys(sourceCounts)) {
+      if (src.startsWith(prefix)) {
+        const targetId = src.slice(prefix.length).toLowerCase();
+        if (ids.some((id) => String(id).toLowerCase() === targetId)) sourceCounts[src]++;
+      } else if (keys.has(src)) {
+        sourceCounts[src]++;
+      }
+    }
+  }
+  return { typeCounts, sourceCounts };
+}
+
+function buildFilterHTML(studyTypes, selectedStudyMap, sourceTypes, selectedSourceMap, typeCounts, sourceCounts) {
+  const tc = typeCounts || {};
+  const sc = sourceCounts || {};
   const studyChips = studyTypes.map((type) => {
     const pressed = selectedStudyMap[type] ? 'true' : 'false';
-    return '<button class="nl-chip" type="button" aria-pressed="' + pressed + '" data-nl-type="' + type + '">' + typeLabel(type) + '</button>';
+    const label = type === ALL_TYPES_KEY ? typeLabel(type) : (typeLabel(type) + ' (' + (tc[type] || 0) + ')');
+    return '<button class="nl-chip" type="button" aria-pressed="' + pressed + '" data-nl-type="' + type + '">' + label + '</button>';
   }).join('');
 
   const sourceChips = (sourceTypes || []).map((entry) => {
     const src = typeof entry === 'string' ? entry : (entry && entry.src) ? entry.src : String(entry);
     const display = typeof entry === 'object' && entry && entry.display ? entry.display : src.replace(/^T/i, '');
     const pressed = selectedSourceMap[src] ? 'true' : 'false';
-    return '<button class="nl-chip" type="button" aria-pressed="' + pressed + '" data-nl-source="' + src + '">' + display + '</button>';
+    return '<button class="nl-chip" type="button" aria-pressed="' + pressed + '" data-nl-source="' + src + '">' + display + ' (' + (sc[src] || 0) + ')</button>';
   }).join('');
 
   const sourceRow = sourceChips
@@ -1073,7 +1102,8 @@ function updateFilterPanel(studyFilter, sourceFilter) {
   if (needsBuild) {
     const savedSearch = searchText;
     const savedSourceSearch = sourceSearchText;
-    container.innerHTML = buildFilterHTML(studyTypes, normalizedStudyFilter, sourceTypes, sourceFilter);
+    const counts = computeChipCounts(items, studyTypes, sourceTypes);
+    container.innerHTML = buildFilterHTML(studyTypes, normalizedStudyFilter, sourceTypes, sourceFilter, counts.typeCounts, counts.sourceCounts);
     const searchInput = container.querySelector('[data-nl-search]');
     const sourceSearchInput = container.querySelector('[data-nl-source-search]');
     if (searchInput) searchInput.value = savedSearch;
