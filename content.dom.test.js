@@ -109,6 +109,20 @@ function loadContentScript(dom) {
   return dom.window;
 }
 
+// Reproduce el escenario real que rompio la v0.1.5 en el navegador del
+// usuario: `globalThis.NotebookFilterCore` NO esta definida cuando content.js
+// se evalua (en Edge/Chrome real la global compartida entre los dos ficheros
+// del mismo content_scripts no estaba disponible; en jsdom/Node si lo esta,
+// por eso los tests no lo cazaban). Cargar content.js SIN filter-core.js
+// fuerza exactamente ese caso y demuestra que el fallback inline mantiene el
+// filtrado operativo. Si este test falla, el filtrado por tipo y por fuente
+// se rompe en el navegador real aunque la busqueda de texto siga funcionando.
+function loadContentScriptWithoutCore(dom) {
+  vm.createContext(dom.window);
+  vm.runInContext(CONTENT_SRC, dom.window, { filename: 'content.js' });
+  return dom.window;
+}
+
 async function settle(window, ticks = 6) {
   for (let i = 0; i < ticks; i += 1) {
     // eslint-disable-next-line no-await-in-loop
@@ -348,4 +362,70 @@ test('type filtering still works with natural, non-templated artifact titles', a
   assert.equal(quiz.hasAttribute('hidden'), true, 'el cuestionario sin palabras clave de tipo en el titulo debe ocultarse al filtrar por Audio');
   assert.equal(audio1.hasAttribute('hidden'), false, 'el audio con titulo natural debe seguir visible al filtrar por Audio');
   assert.equal(audio2.hasAttribute('hidden'), false, 'el segundo audio con titulo natural debe seguir visible al filtrar por Audio');
+});
+
+// Regression del bug real de la v0.1.5: en el navegador del usuario,
+// `globalThis.NotebookFilterCore` no estaba definida al cargar content.js, asi
+// que `const FILTER_CORE = globalThis.NotebookFilterCore` capturaba undefined y
+// `matchesMetadata` caia a `: true` (sin filtrado por tipo ni por fuente, pero
+// la busqueda de texto seguia funcionando porque no usa FILTER_CORE). Este test
+// reproduce ese escenario cargando content.js SIN filter-core.js y verifica
+// que el fallback inline restaura el filtrado por tipo Y por fuente, incluido
+// el filtrado por texto de fuente ("041.md") y el chip de fuente legible.
+test('filtering still works when globalThis.NotebookFilterCore is unavailable (inline fallback)', async () => {
+  // El contexto vm de Node delega `globalThis` al global del proceso, y otros
+  // tests cargan filter-core.js (lo fijan en ese global). Para reproducir
+  // fielmente "la global no esta definida" (el escenario real del navegador),
+  // se elimina temporalmente y se restaura al salir.
+  const savedCore = globalThis.NotebookFilterCore;
+  delete globalThis.NotebookFilterCore;
+  try {
+    const dom = buildDom();
+    const window = loadContentScriptWithoutCore(dom);
+
+    assert.equal(window.__nlFilterCoreSource, 'inline',
+      'sin filter-core.js, FILTER_CORE debe resolverse al fallback inline, no a la global');
+
+    await window.runOnce();
+    dispatchBridgeMetadata(window, { sources: [], artifacts: REAL_ARTIFACTS });
+    await settle(window);
+    await window.runOnce();
+
+    // Sintoma 1: filtrar por tipo (Test/quiz) debe ocultar los audios.
+    const testChip = window.document.querySelector('[data-nl-type="quiz"]');
+    assert.ok(testChip, 'debe existir el chip Test (quiz)');
+    testChip.dispatchEvent(new window.Event('click', { bubbles: true, cancelable: true }));
+    await settle(window);
+
+    const t66Audio = getItemByTitle(window, 'T66 - Audio - Test');
+    const t63Quiz = getItemByTitle(window, 'T063 - Test - Test');
+    assert.equal(t66Audio.hasAttribute('hidden'), true, 'con Test activo, el audio debe ocultarse (sintoma 1)');
+    assert.equal(t63Quiz.hasAttribute('hidden'), false, 'con Test activo, el quiz debe seguir visible (sintoma 1)');
+
+    // Desactivar Test antes de probar la fuente.
+    testChip.dispatchEvent(new window.Event('click', { bubbles: true, cancelable: true }));
+    await settle(window);
+
+    // Sintoma 2: los chips de fuente deben mostrar clave legible (no UUID).
+    const sourceChips = Array.from(window.document.querySelectorAll('[data-nl-source]'))
+      .map((chip) => ({ src: chip.getAttribute('data-nl-source'), label: chip.textContent.trim() }));
+    assert.deepEqual(sourceChips.map((c) => c.label).sort(), ['063', '064', '065', '066'],
+      'los chips de fuente deben mostrar claves legibles derivadas del titulo del artefacto, no UUIDs (sintoma 2)');
+    assert.ok(sourceChips.every((chip) => !chip.src.startsWith('ID:')),
+      'ningun chip deberia caer al fallback por UUID cuando se puede derivar clave del titulo (sintoma 2)');
+
+    // Sintoma 3: escribir "063.md" en la caja de fuente debe filtrar a la 063.
+    const sourceInput = window.document.querySelector('[data-nl-source-search]');
+    assert.ok(sourceInput, 'debe existir la caja de busqueda de fuente');
+    sourceInput.value = '063.md';
+    sourceInput.dispatchEvent(new window.Event('input', { bubbles: true }));
+    await settle(window);
+
+    const t63After = getItemByTitle(window, 'T063 - Test - Test');
+    const t64After = getItemByTitle(window, 'T64 - Test - Test');
+    assert.equal(t63After.hasAttribute('hidden'), false, '"063.md" debe mostrar el artefacto de la fuente 063 (sintoma 3)');
+    assert.equal(t64After.hasAttribute('hidden'), true, '"063.md" debe ocultar los artefactos de otras fuentes (sintoma 3)');
+  } finally {
+    globalThis.NotebookFilterCore = savedCore;
+  }
 });

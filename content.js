@@ -3,7 +3,86 @@ const NB_ROUTE_REGEX = /\/notebook\/[A-Za-z0-9-]+/;
 const NB_ID_REGEX = /\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ALL_TYPES_KEY = '__all__';
 const DEFAULT_STUDY_TYPES = ['audio', 'briefing', 'guide', 'map', 'quiz', 'cards', 'video', 'report', 'presentation', 'infographic', 'datatable'];
-const FILTER_CORE = globalThis.NotebookFilterCore;
+// filter-core.js se carga ANTES que este fichero en la misma entrada de
+// content_scripts del manifest (mundo ISOLATED) y deberia dejar
+// `globalThis.NotebookFilterCore` disponible aqui. Pero en Edge/Chrome real
+// hemos verificado (v0.1.5) que, en el navegador del usuario, esa global NO
+// estaba definida al llegar a este punto; al capturarla con `const`, se
+// quedaba undefined para siempre. Con FILTER_CORE undefined, `matchesMetadata`
+// cae al `: true` y NI el filtro por tipo NI el filtro por fuente hacen nada
+// (la busqueda de texto, que no usa FILTER_CORE, seguia funcionando: justo el
+// sintoma reportado). No se pudo reproducir en jsdom/Node (alli las dos
+// scripts comparten global), por eso los tests no lo cazaban.
+//
+// Para que el filtrado funcione SIEMPRE, independientemente de si la global
+// esta o no, se resuelve con un fallback inline que duplica las funciones
+// puras de filter-core.js. Si la global esta disponible se usa esa (unica
+// fuente de verdad); si no, se usa el fallback. Un test jsdom carga este
+// fichero SIN filter-core.js para garantizar que el fallback funciona solo.
+const INLINE_FILTER_CORE = (function () {
+  const SOURCE_ID_PREFIX = 'ID:';
+  function isContextInvalidatedError(err) {
+    const message = (err && err.message) ? String(err.message) : String(err || '');
+    return message.includes('Extension context invalidated');
+  }
+  function normalizeSourceQuery(raw) {
+    if (raw === null || raw === undefined) return '';
+    const match = String(raw).trim().toUpperCase().match(/(?:^|[^0-9A-Z]|T)0*(\d{2,3})(?!\d)/);
+    return match ? 'T' + match[1].padStart(3, '0') : '';
+  }
+  function sourceKeyFromTitle(title) {
+    if (!title) return '';
+    const match = String(title).match(/(?:^|[^0-9])0*(\d{2,3})(?!\d)/);
+    return match ? normalizeSourceQuery(match[1]) : '';
+  }
+  function normalizeText(value) {
+    return String(value || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[_-]+/g, ' ')
+      .toLowerCase()
+      .trim();
+  }
+  function matchesSourceQuery(sourceKeys, query, sourceNames, sourceIds) {
+    const raw = String(query || '').trim();
+    if (!raw) return true;
+    if (raw.startsWith(SOURCE_ID_PREFIX)) {
+      const targetId = raw.slice(SOURCE_ID_PREFIX.length).toLowerCase();
+      return Array.from(sourceIds || []).some((id) => String(id).toLowerCase() === targetId);
+    }
+    const normalized = normalizeSourceQuery(raw);
+    const matchesKey = normalized
+      && Array.from(sourceKeys || []).some((key) => normalizeSourceQuery(key) === normalized);
+    const textQuery = normalizeText(raw);
+    const matchesName = Array.from(sourceNames || [])
+      .some((name) => normalizeText(name).includes(textQuery));
+    return Boolean(matchesKey || matchesName);
+  }
+  function artifactMatchesFilters(artifact, filters) {
+    const activeTypes = filters.activeTypes || [];
+    const activeSources = filters.activeSources || [];
+    const sourceKeys = artifact.sourceKeys || new Set();
+    const sourceNames = artifact.sourceNames || [];
+    const sourceIds = artifact.sourceIds || [];
+    const matchesType = activeTypes.length === 0
+      || activeTypes.includes('__all__')
+      || activeTypes.includes(artifact.kind);
+    const matchesSelectedSource = activeSources.length === 0
+      || activeSources.some((source) => matchesSourceQuery(sourceKeys, source, sourceNames, sourceIds));
+    const matchesTypedSource = matchesSourceQuery(sourceKeys, filters.sourceQuery || '', sourceNames, sourceIds);
+    return matchesType && matchesSelectedSource && matchesTypedSource;
+  }
+  return {
+    isContextInvalidatedError,
+    normalizeSourceQuery,
+    sourceKeyFromTitle,
+    artifactMatchesFilters,
+    SOURCE_ID_PREFIX,
+  };
+})();
+
+const FILTER_CORE = globalThis.NotebookFilterCore || INLINE_FILTER_CORE;
+const FILTER_CORE_SOURCE = globalThis.NotebookFilterCore ? 'global' : 'inline';
 
 let extensionContextLost = false;
 
@@ -1052,6 +1131,7 @@ async function runOnce() {
 //   __nlFilterDebug()
 // Muestra cuantas fuentes y artefactos se han capturado via batchexecute
 // y cuales quedarian como chip de respaldo por UUID en la seccion FUENTE.
+window.__nlFilterCoreSource = FILTER_CORE_SOURCE;
 window.__nlFilterDebug = function () {
   const sources = Array.from(sourceTitleById.entries()).map(([id, title]) => ({
     id,
@@ -1077,6 +1157,7 @@ window.__nlFilterDebug = function () {
   console.log('[NL Filter] fuentes activas (chips):', activeSourceChips.join(', ') || '(ninguna)');
   console.log('[NL Filter] busqueda texto:', JSON.stringify(searchText), '| busqueda fuente:', JSON.stringify(sourceSearchText));
   console.log('[NL Filter] items del DOM sin enlazar a metadatos:', Array.from(document.querySelectorAll('artifact-library-item')).filter((item) => !item.dataset.nlArtifactId).length);
+  console.log('[NL Filter] FILTER_CORE:', FILTER_CORE_SOURCE, '(' + (FILTER_CORE ? 'definido' : 'INDEFINIDO - el filtrado no funcionara') + ')');
   console.table(sources);
   console.table(artifacts);
   return { sources, artifacts, activeTypes, activeSourceChips, searchText, sourceSearchText };
