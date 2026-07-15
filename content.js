@@ -620,16 +620,6 @@ function sourceDisplayLabel(sourceId) {
   return 'Fuente ' + sourceId.slice(0, 8);
 }
 
-function sourceFilterKeyMatches(activeKey, itemKeys) {
-  const normalizedActive = normalizeSourceKey(activeKey.replace(/^T/i, '')) || normalizeSourceKey(activeKey);
-  if (!normalizedActive) return false;
-  for (const itemKey of itemKeys) {
-    if (itemKey === normalizedActive) return true;
-    if (itemKey.replace(/^T/i, '') === normalizedActive.replace(/^T/i, '')) return true;
-  }
-  return false;
-}
-
 function getTitle(item) {
   const titleEl = item.querySelector('.artifact-title, [class*="artifact-title"]');
   return titleEl ? titleEl.textContent.trim() : '';
