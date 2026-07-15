@@ -520,3 +520,37 @@ test('los filtros guardados se aislan por notebook (no se heredan al cambiar)', 
   assert.equal(allChipB.getAttribute('aria-pressed'), 'true',
     'el notebook B debe arrancar en Todos por defecto');
 });
+
+test('muestra estado vacio cuando los filtros no dejan ningun resultado', async () => {
+  const window = loadContentScript(buildDom());
+
+  await window.runOnce();
+  dispatchBridgeMetadata(window, { sources: REAL_SOURCES, artifacts: REAL_ARTIFACTS });
+  await settle(window);
+  await window.runOnce();
+
+  const emptyState = () => window.document.getElementById('nl-empty-state');
+
+  // Sin filtros: no hay estado vacio visible.
+  await settle(window);
+  assert.ok(!emptyState() || emptyState().hasAttribute('hidden'),
+    'con Todos activo no debe mostrarse el estado vacio');
+
+  // Seleccionar un tipo que no tiene ningun item (video) -> 0 visibles.
+  const videoChip = window.document.querySelector('[data-nl-type="video"]');
+  assert.ok(videoChip, 'debe existir el chip Video (aunque no haya items)');
+  videoChip.dispatchEvent(new window.Event('click', { bubbles: true, cancelable: true }));
+  await settle(window);
+
+  assert.ok(emptyState(), 'debe crearse el elemento de estado vacio');
+  assert.equal(emptyState().hasAttribute('hidden'), false,
+    'con un filtro activo que no deja resultados, el estado vacio debe mostrarse');
+  assert.ok(emptyState().textContent.includes('Ningún resultado'),
+    'el mensaje del estado vacio debe ser legible');
+
+  // Deseleccionar Video -> vuelve a haber resultados -> estado vacio oculto.
+  videoChip.dispatchEvent(new window.Event('click', { bubbles: true, cancelable: true }));
+  await settle(window);
+  assert.equal(emptyState().hasAttribute('hidden'), true,
+    'al desactivar el filtro, el estado vacio debe ocultarse');
+});

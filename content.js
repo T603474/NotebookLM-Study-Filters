@@ -223,6 +223,13 @@ function injectStyles() {
       margin: 8px 0 10px;
       width: 100%;
     }
+    .nl-empty-state {
+      font-size: 11px;
+      color: #9aa0a6;
+      font-style: italic;
+      padding: 6px 2px 2px;
+    }
+    .nl-empty-state[hidden] { display: none !important; }
     .nl-search {
       width: 100%;
       box-sizing: border-box;
@@ -708,6 +715,7 @@ function applyFilters(studyFilter, sourceFilter, searchText, sourceSearchText) {
   const query = (searchText || '').trim().toLowerCase();
   const sourceQuery = (sourceSearchText || '').trim().toLowerCase();
 
+  let visibleCount = 0;
   for (const item of items) {
     const title = getTitle(item);
     const details = getDetails(item);
@@ -731,8 +739,27 @@ function applyFilters(studyFilter, sourceFilter, searchText, sourceSearchText) {
       hideElement(item);
     } else {
       showElement(item);
+      visibleCount++;
     }
   }
+
+  updateEmptyState(visibleCount, activeStudyTypes.length || activeSources.length || Boolean(query) || Boolean(sourceQuery));
+}
+
+function updateEmptyState(visibleCount, hasActiveFilter) {
+  const filterPanel = document.getElementById('nl-filter-panel');
+  if (!filterPanel) return;
+  let empty = filterPanel.querySelector('#nl-empty-state');
+  if (!empty) {
+    empty = document.createElement('div');
+    empty.id = 'nl-empty-state';
+    empty.className = 'nl-empty-state';
+    empty.textContent = 'Ningún resultado con estos filtros';
+    empty.setAttribute('hidden', '');
+    filterPanel.appendChild(empty);
+  }
+  if (visibleCount === 0 && hasActiveFilter) empty.removeAttribute('hidden');
+  else empty.setAttribute('hidden', '');
 }
 
 function buildFilterHTML(studyTypes, selectedStudyMap, sourceTypes, selectedSourceMap) {
