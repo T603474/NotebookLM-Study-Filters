@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 
 const {
   normalizeSourceQuery,
+  sourceKeyFromTitle,
   matchesSourceQuery,
   parseNotebookBatchResponse,
   buildArtifactSourceOptions,
@@ -25,6 +26,25 @@ test('a source query with trailing punctuation does not match everything', () =>
   assert.equal(normalizeSourceQuery('047.'), 'T047');
   assert.equal(matchesSourceQuery(new Set(['T047']), '047.'), true);
   assert.equal(matchesSourceQuery(new Set(['T048']), '047.'), false);
+});
+
+test('derives a source key from real underscore-separated filenames, not just space-separated ones', () => {
+  // Bug real (v0.1.4): "Tema41_Desarrollo_..._ESTUDIO.md" nunca resolvia
+  // porque el regex exigia un limite de palabra ("\b") justo despues del
+  // numero, y "_" cuenta como caracter de palabra en regex -- nunca habia
+  // limite entre "41" y "_". Verificado contra nombres reales obtenidos
+  // via MCP notebook-lm del notebook "Grupo III - ExDesarr (41-65)".
+  assert.equal(sourceKeyFromTitle('Tema41_Desarrollo_Equipos_Departamentales_Dispositivos_Personales_Madrid_ESTUDIO.md'), 'T041');
+  assert.equal(sourceKeyFromTitle('Tema63_Planificacion_Estrategica_SI_Plan_Sistemas_Madrid_EXAMEN.md'), 'T063');
+  // Los convenios anteriores (con espacio, con prefijo T, o numero desnudo)
+  // deben seguir funcionando igual que antes.
+  assert.equal(sourceKeyFromTitle('047.md'), 'T047');
+  assert.equal(sourceKeyFromTitle('T047'), 'T047');
+  assert.equal(sourceKeyFromTitle('Claves y trampas del Tema 041 TIC'), 'T041');
+  // Un titulo sin ningun numero de tema no debe inventarse una clave.
+  assert.equal(sourceKeyFromTitle('Trampas de agilidad para opositores TIC'), '');
+  // Un numero de 4 cifras (p.ej. un anyo) no debe recortarse a 2-3 cifras.
+  assert.equal(sourceKeyFromTitle('Informe anual 2026'), '');
 });
 
 test('source options include only sources referenced by artifacts', () => {

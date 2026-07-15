@@ -239,7 +239,7 @@ function extractSourceKeysFromText(text) {
   // regex antiguas, que exigian literalmente ".md" o "T047").
   const coreKey = FILTER_CORE ? FILTER_CORE.sourceKeyFromTitle(text) : '';
   if (coreKey) keys.add(coreKey);
-  const tema = String(text).match(/\btema\s*0*(\d{2,3})\b/i);
+  const tema = String(text).match(/\btema[\s_]*0*(\d{2,3})(?!\d)/i);
   if (tema) {
     const key = normalizeSourceKey(tema[1]);
     if (key) keys.add(key);
@@ -343,129 +343,6 @@ function typeCodeToKind(code) {
   }
 }
 
-function findStringMatchInNode(node, patterns) {
-  if (typeof node === 'string') {
-    const lower = node.toLowerCase();
-    for (const [pattern, kind] of patterns) {
-      if (pattern.test(lower)) return kind;
-    }
-    return null;
-  }
-  if (Array.isArray(node)) {
-    for (const entry of node) {
-      const found = findStringMatchInNode(entry, patterns);
-      if (found) return found;
-    }
-  }
-  return null;
-}
-
-function extractNestedUuids(node, found) {
-  if (!node) return found;
-  if (typeof node === 'string') {
-    if (isUuid(node)) found.add(node);
-    return found;
-  }
-  if (Array.isArray(node)) {
-    node.forEach((entry) => extractNestedUuids(entry, found));
-  }
-  return found;
-}
-
-function extractSourceIdsFromArtifactRow(row) {
-  const ids = extractNestedUuids(row[3], new Set());
-  return Array.from(ids);
-}
-
-function looksLikeArtifactRow(arr) {
-  return Array.isArray(arr)
-    && arr.length >= 5
-    && isUuid(arr[0])
-    && typeof arr[2] === 'number'
-    && arr[2] >= 1
-    && arr[2] <= 9;
-}
-
-function looksLikeSourceRow(arr) {
-  return Array.isArray(arr)
-    && arr.length >= 2
-    && isUuid(arr[0])
-    && typeof arr[1] === 'string'
-    && arr[1].length > 0
-    && !(typeof arr[2] === 'number' && arr[2] >= 1 && arr[2] <= 9);
-}
-
-function ingestArtifactRow(row) {
-  const id = row[0];
-  let kind = typeCodeToKind(row[2]);
-  if (row[2] === 2) {
-    const reportKind = findStringMatchInNode(row, [
-      [/briefing doc/i, 'briefing'],
-      [/study guide/i, 'guide'],
-      [/blog post/i, 'report'],
-    ]);
-    if (reportKind) kind = reportKind;
-  }
-  if (row[2] === 4) {
-    const variantKind = findStringMatchInNode(row, [
-      [/flashcard|tarjeta/i, 'cards'],
-      [/quiz|cuestionario/i, 'quiz'],
-    ]);
-    if (variantKind) kind = variantKind;
-  }
-  const sourceIds = extractSourceIdsFromArtifactRow(row);
-  const sourceKeys = sourceKeysForIds(sourceIds);
-  artifactMetaCache.set(id, { kind, sourceIds, sourceKeys, title: row[1] || '', typeCode: row[2] });
-  return id;
-}
-
-function ingestSourceRow(row) {
-  registerSourceId(row[0], row[1]);
-}
-
-function walkBatchPayload(node, artifactOrder) {
-  if (!node) return;
-  if (Array.isArray(node)) {
-    if (looksLikeArtifactRow(node)) {
-      artifactOrder.push(ingestArtifactRow(node));
-      return;
-    }
-    if (looksLikeSourceRow(node) && !looksLikeArtifactRow(node)) {
-      ingestSourceRow(node);
-    }
-    node.forEach((entry) => walkBatchPayload(entry, artifactOrder));
-    return;
-  }
-  if (typeof node === 'object') {
-    Object.values(node).forEach((entry) => walkBatchPayload(entry, artifactOrder));
-  }
-}
-
-function parseBatchResponse(text) {
-  if (!text || typeof text !== 'string') return null;
-  try {
-    const cleaned = text.replace(/^\)\]\}'\n?/, '').trim();
-    if (!cleaned) return null;
-    return JSON.parse(cleaned);
-  } catch {
-    return null;
-  }
-}
-
-function ingestBatchResponse(text) {
-  const payload = parseBatchResponse(text);
-  if (!payload) return;
-  const artifactOrder = [];
-  walkBatchPayload(payload, artifactOrder);
-  if (artifactOrder.length) {
-    lastArtifactIdOrder = artifactOrder;
-    for (const meta of artifactMetaCache.values()) {
-      meta.sourceKeys = sourceKeysForIds(meta.sourceIds);
-    }
-    scheduleScan();
-  }
-}
-
 // Registra una clave tipo "T064" para sourceId aunque nunca lleguemos a
 // conocer el titulo real de la fuente ("064.md"). NotebookLM parece cargar
 // el listado de fuentes de forma distinta a como carga los artefactos del
@@ -477,7 +354,8 @@ function ingestBatchResponse(text) {
 // lo usamos como fuente adicional (no exclusiva) de la clave.
 function deriveSourceKeyFromArtifactTitle(title, sourceIds) {
   if (!title || !sourceIds || !sourceIds.length) return;
-  extractSourceKeysFromText(title).forEach((key) => {
+  const derivedKeys = Array.from(extractSourceKeysFromText(title));
+  derivedKeys.forEach((key) => {
     if (!sourceKeyToIds.has(key)) sourceKeyToIds.set(key, new Set());
     const ids = sourceKeyToIds.get(key);
     sourceIds.forEach((sourceId) => ids.add(sourceId));
@@ -528,40 +406,6 @@ function handleBridgeMetadata() {
 }
 
 document.addEventListener('nl-filter-api-metadata', handleBridgeMetadata);
-
-function installNetworkTap() {
-  if (window.__nlNetworkTapInstalled) return;
-  window.__nlNetworkTapInstalled = true;
-
-  const originalFetch = window.fetch;
-  window.fetch = async function (...args) {
-    const response = await originalFetch.apply(this, args);
-    try {
-      const url = typeof args[0] === 'string' ? args[0] : args[0]?.url;
-      if (url && url.includes('batchexecute')) {
-        response.clone().text().then(ingestBatchResponse).catch(() => {});
-      }
-    } catch {}
-    return response;
-  };
-
-  const originalOpen = XMLHttpRequest.prototype.open;
-  const originalSend = XMLHttpRequest.prototype.send;
-  XMLHttpRequest.prototype.open = function (method, url, ...rest) {
-    this.__nlUrl = url;
-    return originalOpen.call(this, method, url, ...rest);
-  };
-  XMLHttpRequest.prototype.send = function (...args) {
-    this.addEventListener('load', function () {
-      try {
-        if (this.__nlUrl && String(this.__nlUrl).includes('batchexecute')) {
-          ingestBatchResponse(this.responseText);
-        }
-      } catch {}
-    });
-    return originalSend.apply(this, args);
-  };
-}
 
 function scanSourcesPanel() {
   const sourcePanel = document.querySelector('.source-panel, [class*="source-panel"]');

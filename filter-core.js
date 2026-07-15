@@ -9,15 +9,25 @@
     return typeof value === 'string' && UUID_PATTERN.test(value);
   }
 
+  // Los nombres de fuente reales no siguen un unico convenio: pueden ser
+  // "047.md" (numero desnudo), "T047 - ..." (prefijo T), o
+  // "Tema41_Desarrollo_..._ESTUDIO.md" (numero pegado a texto y seguido de
+  // "_", no de un espacio). Un "\b" final exige una transicion entre
+  // caracter de palabra y no-palabra, pero "_" TAMBIEN cuenta como caracter
+  // de palabra en regex, asi que "Tema41_Desarrollo" nunca cumplia ese
+  // limite y la fuente nunca resolvia una clave (verificado ejecutando el
+  // regex contra nombres reales obtenidos via MCP notebook-lm). Se sustituye
+  // por lookaround que solo exige que el numero no este pegado a OTRO
+  // digito (para no partir un numero mas largo, p.ej. un año "2026").
   function normalizeSourceQuery(raw) {
     if (raw === null || raw === undefined) return '';
-    const match = String(raw).trim().toUpperCase().match(/(?:^|\bT?)0*(\d{2,3})(?=\D|$)/);
+    const match = String(raw).trim().toUpperCase().match(/(?:^|[^0-9A-Z]|T)0*(\d{2,3})(?!\d)/);
     return match ? 'T' + match[1].padStart(3, '0') : '';
   }
 
   function sourceKeyFromTitle(title) {
     if (!title) return '';
-    const match = String(title).match(/(?:^|\s|T?)0*(\d{2,3})(?:\.md)?\b/i);
+    const match = String(title).match(/(?:^|[^0-9])0*(\d{2,3})(?!\d)/);
     return match ? normalizeSourceQuery(match[1]) : '';
   }
 

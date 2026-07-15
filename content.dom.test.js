@@ -50,8 +50,24 @@ function artifactItemHtml(artifact) {
   </artifact-library-item>`;
 }
 
-function buildDom() {
-  const itemsHtml = REAL_ARTIFACTS.map(artifactItemHtml).join('\n');
+// Datos reales del notebook "Grupo III - ExDesarr (41 - 65)" (obtenidos via
+// MCP notebook-lm) que reprodujeron la regresion reportada tras la v0.1.4:
+// los nombres de fuente reales van pegados al numero con "_" en vez de
+// espacio ("Tema41_..."), y los titulos de artefacto generados por
+// NotebookLM son lenguaje natural que NO siempre repite el numero de tema.
+const REAL_SOURCES_TEMA = [
+  ['193e656a-e19e-405a-b80c-663376b1c8ad', 'Tema41_Desarrollo_Equipos_Departamentales_Dispositivos_Personales_Madrid_ESTUDIO.md'],
+  ['9bbc1678-ec54-4e1a-99d7-9cb36a4d9266', 'Tema41_Desarrollo_Equipos_Departamentales_Dispositivos_Personales_Madrid_EXAMEN.md'],
+];
+
+const REAL_ARTIFACTS_TEMA = [
+  { id: '11111111-1111-1111-1111-111111111111', title: 'Claves y trampas del Tema 041 TIC', typeCode: 4, sourceIds: ['9bbc1678-ec54-4e1a-99d7-9cb36a4d9266'] },
+  { id: '22222222-2222-2222-2222-222222222222', title: 'Trampas de agilidad para opositores TIC', typeCode: 1, sourceIds: ['193e656a-e19e-405a-b80c-663376b1c8ad'] },
+  { id: '33333333-3333-3333-3333-333333333333', title: 'Resumen en audio del tema', typeCode: 1, sourceIds: ['193e656a-e19e-405a-b80c-663376b1c8ad'] },
+];
+
+function buildDom(artifacts = REAL_ARTIFACTS) {
+  const itemsHtml = artifacts.map(artifactItemHtml).join('\n');
   const html = `<!doctype html>
   <html><body>
     <div class="create-artifact-button-container" aria-label="Cuestionario"><mat-icon>help</mat-icon></div>
@@ -259,4 +275,77 @@ test('sanity: with no filters active every item stays visible', async () => {
   const items = window.document.querySelectorAll('artifact-library-item');
   assert.equal(items.length, 6);
   items.forEach((item) => assert.equal(item.hasAttribute('hidden'), false));
+});
+
+// Regresion reportada tras la v0.1.4: en el notebook "Grupo III - ExDesarr
+// (41-65)" los 14 chips de fuente aparecian TODOS como fallback de UUID
+// ("Fuente 7b104fef"...), en vez de mostrar "041" etc. Causa raiz
+// verificada: los nombres de fuente reales van pegados al numero con "_"
+// ("Tema41_Desarrollo_..._ESTUDIO.md"), y las regex de extraccion exigian
+// un limite de palabra ("\b") tras el numero -- pero "_" cuenta como
+// caracter de palabra, asi que ese limite nunca se cumplia y la clave
+// jamas se derivaba, para NINGUNA fuente con ese convenio de nombres.
+test('resolves a readable source label from a real underscore-separated filename', async () => {
+  const dom = buildDom(REAL_ARTIFACTS_TEMA);
+  const window = loadContentScript(dom);
+
+  await window.runOnce();
+  dispatchBridgeMetadata(window, { sources: REAL_SOURCES_TEMA, artifacts: REAL_ARTIFACTS_TEMA });
+  await settle(window);
+  await window.runOnce();
+
+  const sourceChips = Array.from(window.document.querySelectorAll('[data-nl-source]'))
+    .map((chip) => ({ src: chip.getAttribute('data-nl-source'), label: chip.textContent.trim() }));
+
+  assert.deepEqual(sourceChips.map((c) => c.label).sort(), ['041'],
+    'el nombre real "Tema41_..._ESTUDIO.md"/"_EXAMEN.md" deberia resolver a la clave 041, no a un UUID');
+  assert.ok(sourceChips.every((chip) => !chip.src.startsWith('ID:')),
+    'con el nombre de fuente real disponible, no deberia hacer falta el fallback por UUID');
+});
+
+test('only falls back to a UUID chip for the one source with no derivable number, not for its siblings', async () => {
+  // 'Trampas de agilidad para opositores TIC' y 'Resumen en audio del tema'
+  // no repiten el numero de tema en su propio titulo, y aqui simulamos que
+  // el listado de fuentes tampoco llega (sources: []) -- ese caso SI debe
+  // caer al fallback por UUID (no hay ningun texto del que derivar '041'),
+  // pero sin arrastrar a 'Claves y trampas del Tema 041 TIC', que si puede
+  // resolverse a partir de su propio titulo de articulo.
+  const dom = buildDom(REAL_ARTIFACTS_TEMA);
+  const window = loadContentScript(dom);
+
+  await window.runOnce();
+  dispatchBridgeMetadata(window, { sources: [], artifacts: REAL_ARTIFACTS_TEMA });
+  await settle(window);
+  await window.runOnce();
+
+  const sourceChips = Array.from(window.document.querySelectorAll('[data-nl-source]'))
+    .map((chip) => ({ src: chip.getAttribute('data-nl-source'), label: chip.textContent.trim() }));
+
+  const readable = sourceChips.filter((chip) => !chip.src.startsWith('ID:'));
+  const fallback = sourceChips.filter((chip) => chip.src.startsWith('ID:'));
+  assert.deepEqual(readable.map((c) => c.label), ['041'],
+    'el articulo "Claves y trampas del Tema 041 TIC" deberia bastar para derivar 041 sin metadatos de fuente');
+  assert.equal(fallback.length, 1,
+    'la fuente sin ningun numero derivable en su unico articulo debe caer al fallback por UUID, sin desaparecer');
+});
+
+test('type filtering still works with natural, non-templated artifact titles', async () => {
+  const dom = buildDom(REAL_ARTIFACTS_TEMA);
+  const window = loadContentScript(dom);
+
+  await window.runOnce();
+  dispatchBridgeMetadata(window, { sources: REAL_SOURCES_TEMA, artifacts: REAL_ARTIFACTS_TEMA });
+  await settle(window);
+  await window.runOnce();
+
+  const audioChip = window.document.querySelector('[data-nl-type="audio"]');
+  audioChip.dispatchEvent(new window.Event('click', { bubbles: true, cancelable: true }));
+  await settle(window);
+
+  const quiz = getItemByTitle(window, 'Claves y trampas del Tema 041 TIC');
+  const audio1 = getItemByTitle(window, 'Trampas de agilidad para opositores TIC');
+  const audio2 = getItemByTitle(window, 'Resumen en audio del tema');
+  assert.equal(quiz.hasAttribute('hidden'), true, 'el cuestionario sin palabras clave de tipo en el titulo debe ocultarse al filtrar por Audio');
+  assert.equal(audio1.hasAttribute('hidden'), false, 'el audio con titulo natural debe seguir visible al filtrar por Audio');
+  assert.equal(audio2.hasAttribute('hidden'), false, 'el segundo audio con titulo natural debe seguir visible al filtrar por Audio');
 });
