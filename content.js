@@ -1029,6 +1029,24 @@ function cleanupFilterPanel() {
   sourceSearchText = '';
 }
 
+function notebookId() {
+  const match = String(location.pathname).match(NB_ID_REGEX);
+  return match ? match[0].slice(1) : '';
+}
+
+// Claves de almacenamiento aisladas por notebook: si estamos en una ruta de
+// notebook, la clave incluye su ID, de modo que un filtro guardado en un
+// notebook (p.ej. fuente "041") no se herede al cambiar a otro donde esa
+// fuente no existe y oculte todo. Si no hay ID (no es ruta de notebook), se
+// cae a las claves globales legacy. La migracion legacy (leer las claves
+// globales antiguas una vez y replicarlas por notebook) se hace en
+// loadStudyFilter.
+function notebookStorageKeys() {
+  const id = notebookId();
+  if (!id) return { studyKey: 'studyTypes', sourceKey: 'sourceTypes' };
+  return { studyKey: 'studyTypes:' + id, sourceKey: 'sourceTypes:' + id };
+}
+
 async function loadStudyFilter() {
   return new Promise((resolve) => {
     if (!hasValidExtensionContext() || !chrome.storage?.local) {
@@ -1036,10 +1054,27 @@ async function loadStudyFilter() {
       return;
     }
     try {
-      chrome.storage.local.get(['studyTypes', 'sourceTypes'], (res) => resolve({
-        studyTypes: res?.studyTypes || {},
-        sourceTypes: res?.sourceTypes || {},
-      }));
+      const { studyKey, sourceKey } = notebookStorageKeys();
+      const keys = [studyKey, sourceKey, 'studyTypes', 'sourceTypes'];
+      chrome.storage.local.get(keys, (res) => {
+        let study = res?.[studyKey];
+        let source = res?.[sourceKey];
+        const toMigrate = {};
+        if (study === undefined) {
+          const legacy = res?.studyTypes;
+          study = legacy || {};
+          if (legacy) toMigrate[studyKey] = legacy;
+        }
+        if (source === undefined) {
+          const legacy = res?.sourceTypes;
+          source = legacy || {};
+          if (legacy) toMigrate[sourceKey] = legacy;
+        }
+        if (Object.keys(toMigrate).length) {
+          try { chrome.storage.local.set(toMigrate, () => {}); } catch {}
+        }
+        resolve({ studyTypes: study || {}, sourceTypes: source || {} });
+      });
     } catch {
       resolve({ studyTypes: {}, sourceTypes: {} });
     }
@@ -1053,7 +1088,12 @@ function saveStudyFilter(data) {
       return;
     }
     try {
-      chrome.storage.local.set(data, resolve);
+      const { studyKey, sourceKey } = notebookStorageKeys();
+      const payload = {
+        [studyKey]: data?.studyTypes || {},
+        [sourceKey]: data?.sourceTypes || {},
+      };
+      chrome.storage.local.set(payload, resolve);
     } catch {
       resolve();
     }

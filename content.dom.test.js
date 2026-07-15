@@ -66,7 +66,10 @@ const REAL_ARTIFACTS_TEMA = [
   { id: '33333333-3333-3333-3333-333333333333', title: 'Resumen en audio del tema', typeCode: 1, sourceIds: ['193e656a-e19e-405a-b80c-663376b1c8ad'] },
 ];
 
-function buildDom(artifacts = REAL_ARTIFACTS) {
+function buildDom(opts = {}) {
+  const artifacts = opts.artifacts || REAL_ARTIFACTS;
+  const url = opts.url || 'https://notebooklm.google.com/notebook/66d41b00-97bc-4f4c-a871-ba9f634f8b78';
+  const store = opts.store !== undefined ? opts.store : {};
   const itemsHtml = artifacts.map(artifactItemHtml).join('\n');
   const html = `<!doctype html>
   <html><body>
@@ -79,9 +82,7 @@ function buildDom(artifacts = REAL_ARTIFACTS) {
     </div>
   </body></html>`;
 
-  const dom = new JSDOM(html, {
-    url: 'https://notebooklm.google.com/notebook/66d41b00-97bc-4f4c-a871-ba9f634f8b78',
-  });
+  const dom = new JSDOM(html, { url });
   const { window } = dom;
 
   window.requestAnimationFrame = window.requestAnimationFrame || ((cb) => setTimeout(cb, 0));
@@ -93,8 +94,12 @@ function buildDom(artifacts = REAL_ARTIFACTS) {
     },
     storage: {
       local: {
-        get: (_keys, cb) => cb({}),
-        set: (_obj, cb) => { if (cb) cb(); },
+        get: (keys, cb) => {
+          const out = {};
+          (Array.isArray(keys) ? keys : [keys]).forEach((k) => { if (k in store) out[k] = store[k]; });
+          cb(out);
+        },
+        set: (obj, cb) => { Object.assign(store, obj); if (cb) cb(); },
       },
     },
   };
@@ -301,7 +306,7 @@ test('sanity: with no filters active every item stays visible', async () => {
 // caracter de palabra, asi que ese limite nunca se cumplia y la clave
 // jamas se derivaba, para NINGUNA fuente con ese convenio de nombres.
 test('resolves a readable source label from a real underscore-separated filename', async () => {
-  const dom = buildDom(REAL_ARTIFACTS_TEMA);
+  const dom = buildDom({ artifacts: REAL_ARTIFACTS_TEMA });
   const window = loadContentScript(dom);
 
   await window.runOnce();
@@ -325,7 +330,7 @@ test('only falls back to a UUID chip for the one source with no derivable number
   // caer al fallback por UUID (no hay ningun texto del que derivar '041'),
   // pero sin arrastrar a 'Claves y trampas del Tema 041 TIC', que si puede
   // resolverse a partir de su propio titulo de articulo.
-  const dom = buildDom(REAL_ARTIFACTS_TEMA);
+  const dom = buildDom({ artifacts: REAL_ARTIFACTS_TEMA });
   const window = loadContentScript(dom);
 
   await window.runOnce();
@@ -345,7 +350,7 @@ test('only falls back to a UUID chip for the one source with no derivable number
 });
 
 test('type filtering still works with natural, non-templated artifact titles', async () => {
-  const dom = buildDom(REAL_ARTIFACTS_TEMA);
+  const dom = buildDom({ artifacts: REAL_ARTIFACTS_TEMA });
   const window = loadContentScript(dom);
 
   await window.runOnce();
@@ -483,4 +488,35 @@ test('el MutationObserver se re-ancla al panel de Studio tras runOnce', async ()
   const panel = window.document.querySelector('.panel-content-scrollable');
   assert.equal(target, panel,
     'el target del observer debe ser el panel de Studio localizado');
+});
+
+test('los filtros guardados se aislan por notebook (no se heredan al cambiar)', async () => {
+  const store = {}; // almacen compartido por los dos notebooks
+  const urlA = 'https://notebooklm.google.com/notebook/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+  const urlB = 'https://notebooklm.google.com/notebook/bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+  const winA = loadContentScript(buildDom({ url: urlA, store }));
+  const winB = loadContentScript(buildDom({ url: urlB, store }));
+
+  // Notebook A: activar el filtro Audio y dejar que se guarde.
+  await winA.runOnce();
+  dispatchBridgeMetadata(winA, { sources: REAL_SOURCES, artifacts: REAL_ARTIFACTS });
+  await settle(winA);
+  await winA.runOnce();
+  const audioChipA = winA.document.querySelector('[data-nl-type="audio"]');
+  audioChipA.dispatchEvent(new winA.Event('click', { bubbles: true, cancelable: true }));
+  await settle(winA);
+  assert.equal(audioChipA.getAttribute('aria-pressed'), 'true',
+    'sanity: el chip Audio debe quedar activo en el notebook A');
+
+  // Notebook B: no debe heredar el filtro de A; debe arrancar en "Todos".
+  await winB.runOnce();
+  dispatchBridgeMetadata(winB, { sources: REAL_SOURCES, artifacts: REAL_ARTIFACTS });
+  await settle(winB);
+  await winB.runOnce();
+  const audioChipB = winB.document.querySelector('[data-nl-type="audio"]');
+  const allChipB = winB.document.querySelector('[data-nl-type="__all__"]');
+  assert.equal(audioChipB.getAttribute('aria-pressed'), 'false',
+    'el notebook B no debe heredar el filtro Audio guardado en el notebook A');
+  assert.equal(allChipB.getAttribute('aria-pressed'), 'true',
+    'el notebook B debe arrancar en Todos por defecto');
 });
