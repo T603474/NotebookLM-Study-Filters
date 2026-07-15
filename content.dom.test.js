@@ -622,3 +622,33 @@ test('los chips muestran el recuento de items por tipo y por fuente', async () =
   assert.ok(chip064, 'debe existir el chip de la fuente 064');
   assert.ok(chip064.textContent.includes('(3)'), 'la fuente 064 (3 items) debe mostrar (3)');
 });
+
+test('el panel se colapsa al clic en la cabecera y persiste el estado por notebook', async () => {
+  const window = loadContentScript(buildDom());
+
+  await window.runOnce();
+  dispatchBridgeMetadata(window, { sources: REAL_SOURCES, artifacts: REAL_ARTIFACTS });
+  await settle(window);
+  await window.runOnce();
+
+  const body = () => window.document.getElementById('nl-filter-body');
+  const arrow = () => window.document.getElementById('nl-collapse-arrow');
+  assert.ok(body(), 'debe existir el cuerpo del panel');
+  assert.equal(body().classList.contains('nl-collapsed'), false, 'inicia expandido');
+  assert.equal(arrow().textContent, '▼', 'inicia con flecha de expandido');
+
+  const title = window.document.querySelector('.nl-filter-title');
+  title.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(window);
+  assert.equal(body().classList.contains('nl-collapsed'), true, 'tras un clic en la cabecera debe colapsar');
+  assert.equal(arrow().textContent, '▶', 'la flecha debe indicar colapsado');
+
+  // Persistencia: un nuevo runOnce debe respetar el estado guardado.
+  await window.runOnce();
+  assert.equal(body().classList.contains('nl-collapsed'), true, 'el estado colapsado debe persistir tras runOnce');
+
+  title.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await settle(window);
+  assert.equal(body().classList.contains('nl-collapsed'), false, 'tras otro clic debe volver a expandirse');
+  assert.equal(arrow().textContent, '▼', 'la flecha debe volver a expandido');
+});

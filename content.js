@@ -202,7 +202,16 @@ function injectStyles() {
       justify-content: space-between;
       align-items: center;
       color: #f1f3f4;
+      cursor: pointer;
+      user-select: none;
     }
+    .nl-collapse-arrow {
+      display: inline-block;
+      width: 10px;
+      font-size: 9px;
+      opacity: 0.8;
+    }
+    #nl-filter-body.nl-collapsed { display: none; }
     .nl-result-count {
       font-weight: 400;
       opacity: 0.7;
@@ -855,16 +864,18 @@ function buildFilterHTML(studyTypes, selectedStudyMap, sourceTypes, selectedSour
 
   return (
     '<div class="nl-filter-title">' +
-    '<span>Filtros' + (EXTENSION_VERSION ? ' · v' + EXTENSION_VERSION : '') + ' <span id="nl-result-count" class="nl-result-count"></span></span>' +
+    '<span><span id="nl-collapse-arrow" class="nl-collapse-arrow">▼</span> Filtros' + (EXTENSION_VERSION ? ' · v' + EXTENSION_VERSION : '') + ' <span id="nl-result-count" class="nl-result-count"></span></span>' +
     '<span style="opacity:0.7;cursor:pointer;" data-nl-action="clear">Limpiar</span>' +
     '</div>' +
+    '<div id="nl-filter-body">' +
     '<div class="nl-filter-label">Tipo de contenido</div>' +
     '<input type="search" class="nl-search" data-nl-search placeholder="Buscar guías..." />' +
     '<div class="nl-filter-row" data-nl-row>' + studyChips + '</div>' +
     '<hr class="nl-filter-divider" />' +
     '<div class="nl-filter-label">Fuentes</div>' +
     '<input type="search" class="nl-search" data-nl-source-search placeholder="Buscar fuente (ej: 047.md)..." />' +
-    sourceRow
+    sourceRow +
+    '</div>'
   );
 }
 
@@ -1117,6 +1128,9 @@ function updateFilterPanel(studyFilter, sourceFilter) {
   }
 
   applyFilters(normalizedStudyFilter, sourceFilter, searchText, sourceSearchText);
+  const body = container.querySelector('#nl-filter-body');
+  if (body) body.classList.toggle('nl-collapsed', collapsed);
+  updateCollapseArrow();
   return container;
 }
 
@@ -1149,15 +1163,36 @@ function notebookStorageKeys() {
   return { studyKey: 'studyTypes:' + id, sourceKey: 'sourceTypes:' + id };
 }
 
+function collapsedStorageKey() {
+  const id = notebookId();
+  return id ? 'collapsed:' + id : 'collapsed';
+}
+
+function saveCollapsed(value) {
+  return new Promise((resolve) => {
+    if (!hasValidExtensionContext() || !chrome.storage?.local) {
+      resolve();
+      return;
+    }
+    try {
+      const key = collapsedStorageKey();
+      chrome.storage.local.set({ [key]: !!value }, resolve);
+    } catch {
+      resolve();
+    }
+  });
+}
+
 async function loadStudyFilter() {
   return new Promise((resolve) => {
     if (!hasValidExtensionContext() || !chrome.storage?.local) {
-      resolve({ studyTypes: {}, sourceTypes: {} });
+      resolve({ studyTypes: {}, sourceTypes: {}, collapsed: false });
       return;
     }
     try {
       const { studyKey, sourceKey } = notebookStorageKeys();
-      const keys = [studyKey, sourceKey, 'studyTypes', 'sourceTypes'];
+      const collapsedKey = collapsedStorageKey();
+      const keys = [studyKey, sourceKey, 'studyTypes', 'sourceTypes', collapsedKey];
       chrome.storage.local.get(keys, (res) => {
         let study = res?.[studyKey];
         let source = res?.[sourceKey];
@@ -1175,10 +1210,10 @@ async function loadStudyFilter() {
         if (Object.keys(toMigrate).length) {
           try { chrome.storage.local.set(toMigrate, () => {}); } catch {}
         }
-        resolve({ studyTypes: study || {}, sourceTypes: source || {} });
+        resolve({ studyTypes: study || {}, sourceTypes: source || {}, collapsed: !!res?.[collapsedKey] });
       });
     } catch {
-      resolve({ studyTypes: {}, sourceTypes: {} });
+      resolve({ studyTypes: {}, sourceTypes: {}, collapsed: false });
     }
   });
 }
@@ -1204,6 +1239,7 @@ function saveStudyFilter(data) {
 
 let searchText = '';
 let sourceSearchText = '';
+let collapsed = false;
 let cachedStudyTypesKey = '';
 let cachedSourceTypesKey = '';
 let initRetryTimer = null;
@@ -1310,9 +1346,26 @@ async function runOnce() {
   const stored = await loadStudyFilter();
   const studyFilter = stored.studyTypes || {};
   const sourceFilter = stored.sourceTypes || {};
+  collapsed = !!stored.collapsed;
 
   updateFilterPanel(studyFilter, sourceFilter);
   reanchorObserver();
+}
+
+function toggleCollapse() {
+  const container = document.getElementById('nl-filter-panel');
+  if (!container) return;
+  const body = container.querySelector('#nl-filter-body');
+  if (!body) return;
+  collapsed = !collapsed;
+  body.classList.toggle('nl-collapsed', collapsed);
+  updateCollapseArrow();
+  saveCollapsed(collapsed);
+}
+
+function updateCollapseArrow() {
+  const arrow = document.getElementById('nl-collapse-arrow');
+  if (arrow) arrow.textContent = collapsed ? '▶' : '▼';
 }
 
 // Herramienta de diagnostico invocable desde la consola de DevTools
@@ -1386,6 +1439,12 @@ document.addEventListener('click', (event) => {
     saveStudyFilter({ studyTypes: clearedStudy, sourceTypes: {} });
     applyFilters(clearedStudy, {}, '', '');
     return;
+  }
+
+  const titleEl = target.closest && target.closest('.nl-filter-title');
+  if (titleEl) {
+    event.preventDefault();
+    toggleCollapse();
   }
 });
 
