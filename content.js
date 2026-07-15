@@ -1066,6 +1066,7 @@ let cachedStudyTypesKey = '';
 let cachedSourceTypesKey = '';
 let initRetryTimer = null;
 let scanObserver = null;
+let observedRoot = null;
 
 let scanScheduled = false;
 function scheduleScan() {
@@ -1085,7 +1086,25 @@ function initObserver() {
   document.documentElement.appendChild(sentinel);
 
   scanObserver = new MutationObserver(() => scheduleScan());
-  scanObserver.observe(document.documentElement, { childList: true, subtree: true });
+  observedRoot = document.documentElement;
+  scanObserver.observe(observedRoot, { childList: true, subtree: true });
+}
+
+// Re-ancla el observer al panel de Studio cuando se localiza, para no
+// disparar scheduleScan por cada mutacion del resto de la SPA de Angular.
+// Si el panel no esta (p. ej. al cambiar de ruta), se vuelve a observar
+// document.documentElement para detectar cuando reaparece. Si el panel se
+// reemplaza en sitio, su contenedor padre sigue notificando al estar en
+// subtree; como salvaguarda, startInitRetries y el propio runOnce reanclan.
+function reanchorObserver() {
+  if (!scanObserver) return;
+  const panel = findStudioPanel();
+  const target = panel || document.documentElement;
+  if (target === observedRoot) return;
+  scanObserver.disconnect();
+  scanObserver.observe(target, { childList: true, subtree: true });
+  observedRoot = target;
+  window.__nlFilterObserverTarget = target;
 }
 
 function startInitRetries() {
@@ -1131,6 +1150,7 @@ async function runOnce() {
   const sourceFilter = stored.sourceTypes || {};
 
   updateFilterPanel(studyFilter, sourceFilter);
+  reanchorObserver();
 }
 
 // Herramienta de diagnostico invocable desde la consola de DevTools

@@ -466,3 +466,21 @@ test('los cuadros de busqueda aplican el filtro con debounce (no inmediato)', as
   assert.equal(audioAfter.hasAttribute('hidden'), false,
     'tras el debounce, el audio con "audio" en el titulo debe seguir visible');
 });
+
+test('el MutationObserver se re-ancla al panel de Studio tras runOnce', async () => {
+  const dom = buildDom();
+  const window = loadContentScript(dom);
+
+  await window.runOnce();
+  dispatchBridgeMetadata(window, { sources: REAL_SOURCES, artifacts: REAL_ARTIFACTS });
+  await settle(window);
+  await window.runOnce();
+
+  const target = window.__nlFilterObserverTarget;
+  assert.ok(target, 'runOnce debe haber expuesto el target del observer');
+  assert.notEqual(target, window.document.documentElement,
+    'el observer debe anclarse al panel de Studio, no seguir en documentElement');
+  const panel = window.document.querySelector('.panel-content-scrollable');
+  assert.equal(target, panel,
+    'el target del observer debe ser el panel de Studio localizado');
+});
