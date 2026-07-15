@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Filtro de Estudio para NotebookLM",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Filtra tipos de estudio y fuentes en NotebookLM sin romper la SPA.",
   "permissions": ["storage", "activeTab"],
   "host_permissions": [

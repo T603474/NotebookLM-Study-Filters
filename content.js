@@ -761,8 +761,8 @@ function buildFilterHTML(studyTypes, selectedStudyMap, sourceTypes, selectedSour
     '<span>Filtros' + (EXTENSION_VERSION ? ' · v' + EXTENSION_VERSION : '') + '</span>' +
     '<span style="opacity:0.7;cursor:pointer;" data-nl-action="clear">Limpiar</span>' +
     '</div>' +
-    '<input type="search" class="nl-search" data-nl-search placeholder="Buscar guías..." />' +
     '<div class="nl-filter-label">Tipo de contenido</div>' +
+    '<input type="search" class="nl-search" data-nl-search placeholder="Buscar guías..." />' +
     '<div class="nl-filter-row" data-nl-row>' + studyChips + '</div>' +
     '<div class="nl-filter-label">Fuente</div>' +
     '<input type="search" class="nl-search" data-nl-source-search placeholder="Buscar fuente (ej: 047.md)..." />' +
