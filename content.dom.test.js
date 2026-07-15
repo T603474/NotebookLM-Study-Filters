@@ -270,6 +270,7 @@ test('typing a source query in the text box filters correctly (symptom 3)', asyn
   sourceInput.value = '063.md';
   sourceInput.dispatchEvent(new window.Event('input', { bubbles: true }));
   await settle(window);
+  await new Promise((resolve) => window.setTimeout(resolve, 160));
 
   const t63Quiz = getItemByTitle(window, 'T063 - Test - Test');
   const t64Quiz = getItemByTitle(window, 'T64 - Test - Test');
@@ -420,6 +421,7 @@ test('filtering still works when globalThis.NotebookFilterCore is unavailable (i
     sourceInput.value = '063.md';
     sourceInput.dispatchEvent(new window.Event('input', { bubbles: true }));
     await settle(window);
+    await new Promise((resolve) => window.setTimeout(resolve, 160));
 
     const t63After = getItemByTitle(window, 'T063 - Test - Test');
     const t64After = getItemByTitle(window, 'T64 - Test - Test');
@@ -428,4 +430,39 @@ test('filtering still works when globalThis.NotebookFilterCore is unavailable (i
   } finally {
     globalThis.NotebookFilterCore = savedCore;
   }
+});
+
+test('los cuadros de busqueda aplican el filtro con debounce (no inmediato)', async () => {
+  const dom = buildDom();
+  const window = loadContentScript(dom);
+
+  await window.runOnce();
+  dispatchBridgeMetadata(window, { sources: REAL_SOURCES, artifacts: REAL_ARTIFACTS });
+  await settle(window);
+  await window.runOnce();
+
+  const searchInput = window.document.querySelector('[data-nl-search]');
+  assert.ok(searchInput, 'debe existir el cuadro de busqueda');
+
+  // Escribir "audio": ocultaria los quiz (T063/T64 - Test - Test) y dejaria
+  // los audios visibles. Con debounce, justo despues de escribir (settle solo
+  // vacia microtasks de setTimeout(0), no los 120ms del debounce) el filtrado
+  // todavia NO se ha aplicado.
+  searchInput.value = 'audio';
+  searchInput.dispatchEvent(new window.Event('input', { bubbles: true }));
+  await settle(window);
+
+  const quiz = getItemByTitle(window, 'T063 - Test - Test');
+  assert.equal(quiz.hasAttribute('hidden'), false,
+    'con debounce, el quiz debe seguir visible justo despues de escribir (el filtrado aun no se ha aplicado)');
+
+  // Al superar el debounce (~120ms), el filtrado se aplica.
+  await new Promise((resolve) => window.setTimeout(resolve, 160));
+
+  const quizAfter = getItemByTitle(window, 'T063 - Test - Test');
+  const audioAfter = getItemByTitle(window, 'T66 - Audio - Test');
+  assert.equal(quizAfter.hasAttribute('hidden'), true,
+    'tras el debounce, el quiz sin "audio" en el titulo debe ocultarse');
+  assert.equal(audioAfter.hasAttribute('hidden'), false,
+    'tras el debounce, el audio con "audio" en el titulo debe seguir visible');
 });

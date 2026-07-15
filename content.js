@@ -817,19 +817,29 @@ function attachSearch(container) {
   const input = container.querySelector('[data-nl-search]');
   if (!input || input.getAttribute('data-nl-search-attached') === 'true') return;
   input.setAttribute('data-nl-search-attached', 'true');
+  let searchTimer = null;
   input.addEventListener('input', () => {
     searchText = input.value || '';
-    const { pressedStudy, pressedSource } = readPressedFilters(container);
-    persistAndApplyFilters(pressedStudy, pressedSource);
+    if (searchTimer) clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => {
+      searchTimer = null;
+      const { pressedStudy, pressedSource } = readPressedFilters(container);
+      persistAndApplyFilters(pressedStudy, pressedSource);
+    }, 120);
   });
 
   const sourceInput = container.querySelector('[data-nl-source-search]');
   if (!sourceInput || sourceInput.getAttribute('data-nl-source-search-attached') === 'true') return;
   sourceInput.setAttribute('data-nl-source-search-attached', 'true');
+  let sourceTimer = null;
   sourceInput.addEventListener('input', () => {
     sourceSearchText = sourceInput.value || '';
-    const { pressedStudy, pressedSource } = readPressedFilters(container);
-    persistAndApplyFilters(pressedStudy, pressedSource);
+    if (sourceTimer) clearTimeout(sourceTimer);
+    sourceTimer = setTimeout(() => {
+      sourceTimer = null;
+      const { pressedStudy, pressedSource } = readPressedFilters(container);
+      persistAndApplyFilters(pressedStudy, pressedSource);
+    }, 120);
   });
 }
 
