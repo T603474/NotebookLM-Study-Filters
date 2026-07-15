@@ -257,4 +257,8 @@ La suite incluye:
 
 ## Licencia
 
-Uso personal/educativo. Esta extensión no está afiliada a Google ni a NotebookLM.
+[MIT](LICENSE) © 2026 T603474
+
+Permiso para usar, copiar, modificar, fusionar, publicar, distribuir, sublicenciar y/o vender copias del software, y para permitir a las personas a las que se les proporcione hacerlo, bajo la única condición de conservar el aviso de copyright y este aviso de permiso en todas las copias o partes sustanciales del software.
+
+Esta extensión no está afiliada a Google ni a NotebookLM.
