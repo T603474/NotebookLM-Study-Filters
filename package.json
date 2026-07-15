@@ -5,7 +5,7 @@
   "private": true,
   "main": "background.js",
   "scripts": {
-    "test": "node --test filter-core.test.js content.dom.test.js"
+    "test": "node --test filter-core.test.js content.dom.test.js popup.test.js"
   },
   "keywords": [],
   "author": "",

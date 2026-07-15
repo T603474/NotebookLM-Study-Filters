@@ -6,6 +6,23 @@ document.addEventListener('DOMContentLoaded', () => {
 
   if (!studyContainer || !sourceContainer) return;
 
+  // Mismimas etiquetas y claves por notebook que content.js, para que el
+  // popup y el panel in-page persistan y lean el mismo estado. Antes el popup
+  // usaba claves globales (studyTypes/sourceTypes), que tras el aislamiento
+  // por notebook de content.js quedaban desincronizadas.
+  const NOTEBOOK_ID_REGEX = /\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const TYPE_LABELS = {
+    audio: 'Audio', briefing: 'Briefing', cards: 'Tarjetas', datatable: 'Tabla de datos',
+    guide: 'Guía', infographic: 'Infografía', map: 'Mapa', presentation: 'Presentación',
+    quiz: 'Test', report: 'Informes', video: 'Vídeo', other: 'Otro',
+  };
+  const typeLabel = (t) => TYPE_LABELS[t] || (t.charAt(0).toUpperCase() + t.slice(1));
+  const notebookIdFromUrl = (url) => {
+    const m = String(url || '').match(NOTEBOOK_ID_REGEX);
+    return m ? m[0].slice(1) : '';
+  };
+  let currentNotebookId = '';
+
   const setStatus = (message) => {
     if (statusEl) statusEl.textContent = message;
   };
@@ -26,7 +43,7 @@ document.addEventListener('DOMContentLoaded', () => {
       data.studyTypes.forEach((type) => {
         const btn = document.createElement('button');
         btn.type = 'button';
-        btn.textContent = type.charAt(0).toUpperCase() + type.slice(1);
+        btn.textContent = typeLabel(type);
         btn.setAttribute('data-study', type);
         btn.setAttribute('aria-pressed', activeStudy[type] ? 'true' : 'false');
         btn.addEventListener('click', async () => {
@@ -87,8 +104,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const save = (obj) => {
     if (!chromeApi) return Promise.resolve();
+    const id = currentNotebookId;
+    const payload = {};
+    payload['studyTypes' + (id ? ':' + id : '')] = obj.studyTypes || {};
+    payload['sourceTypes' + (id ? ':' + id : '')] = obj.sourceTypes || {};
     return new Promise((resolve) => {
-      chromeApi.storage.local.set(obj, resolve);
+      chromeApi.storage.local.set(payload, resolve);
     });
   };
 
@@ -103,7 +124,9 @@ document.addEventListener('DOMContentLoaded', () => {
           resolve(null);
           return;
         }
-        resolve(tabs && tabs[0] ? tabs[0] : null);
+        const tab = tabs && tabs[0] ? tabs[0] : null;
+        if (tab && tab.url) currentNotebookId = notebookIdFromUrl(tab.url);
+        resolve(tab);
       });
     });
   };
@@ -133,11 +156,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const load = () => {
     if (!chromeApi) return Promise.resolve({ studyTypes: {}, sourceTypes: {} });
+    const id = currentNotebookId;
+    const studyKey = 'studyTypes' + (id ? ':' + id : '');
+    const sourceKey = 'sourceTypes' + (id ? ':' + id : '');
     return new Promise((resolve) => {
-      chromeApi.storage.local.get(['studyTypes', 'sourceTypes'], (result) => resolve({
-        studyTypes: result.studyTypes || {},
-        sourceTypes: result.sourceTypes || {},
-      }));
+      chromeApi.storage.local.get([studyKey, sourceKey, 'studyTypes', 'sourceTypes'], (result) => {
+        let study = result[studyKey];
+        let source = result[sourceKey];
+        // Migracion legacy: si no hay clave por notebook, leer la global.
+        if (study === undefined) study = result.studyTypes || {};
+        if (source === undefined) source = result.sourceTypes || {};
+        resolve({ studyTypes: study || {}, sourceTypes: source || {} });
+      });
     });
   };
 
@@ -167,6 +197,7 @@ document.addEventListener('DOMContentLoaded', () => {
   };
 
   Promise.resolve()
+    .then(() => getActiveTab())
     .then(() => load())
     .then((stored) =>
       fetchAvailable().then((available) => ({ stored, available }))
