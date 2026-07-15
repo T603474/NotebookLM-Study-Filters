@@ -554,3 +554,29 @@ test('muestra estado vacio cuando los filtros no dejan ningun resultado', async 
   assert.equal(emptyState().hasAttribute('hidden'), true,
     'al desactivar el filtro, el estado vacio debe ocultarse');
 });
+
+test('los chips de fuente muestran el nombre completo cuando scanSourcesPanel lo captura', async () => {
+  const dom = buildDom();
+  const window = loadContentScript(dom);
+
+  // Simula el panel "Fuentes" del DOM de NotebookLM: cada fuente con su UUID
+  // (data-source-id) y su titulo real ("063.md"). El bridge entrega sources:[]
+  // (los titulos no vienen por batchexecute), de modo que los titulos solo
+  // pueden llegar via scanSourcesPanel leyendo este panel.
+  const sourcesPanel = window.document.createElement('div');
+  sourcesPanel.className = 'source-panel';
+  sourcesPanel.innerHTML = REAL_SOURCES.map(([id, title]) =>
+    `<div class="single-source-container" data-source-id="${id}"><span class="source-title">${title}</span></div>`
+  ).join('');
+  window.document.body.appendChild(sourcesPanel);
+
+  await window.runOnce();
+  dispatchBridgeMetadata(window, { sources: [], artifacts: REAL_ARTIFACTS });
+  await settle(window);
+  await window.runOnce();
+
+  const labels = Array.from(window.document.querySelectorAll('[data-nl-source]'))
+    .map((chip) => chip.textContent.trim()).sort();
+  assert.deepEqual(labels, ['063.md', '064.md', '065.md', '066.md'],
+    'los chips deben mostrar el nombre completo de la fuente (063.md), no solo el numero ni el UUID');
+});

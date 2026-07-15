@@ -500,23 +500,49 @@ function handleBridgeMetadata() {
 document.addEventListener('nl-filter-api-metadata', handleBridgeMetadata);
 
 function scanSourcesPanel() {
-  const sourcePanel = document.querySelector('.source-panel, [class*="source-panel"]');
+  const sourcePanel = document.querySelector(
+    '.source-panel, [class*="source-panel"], [class*="sources-panel"], [class*="source-list"], [class*="sources-list"]'
+  );
   if (!sourcePanel) return;
-  sourcePanel.querySelectorAll('.single-source-container, [class*="source-item"], mat-list-item').forEach((row) => {
-    const titleEl = row.querySelector('[class*="source-title"], .source-title, .title, span');
-    const title = titleEl ? titleEl.textContent.trim() : row.textContent.trim();
+  const rows = sourcePanel.querySelectorAll(
+    '.single-source-container, [class*="source-item"], [class*="source-card"], [class*="source-row"], mat-list-item, [class*="mat-list-item"]'
+  );
+  rows.forEach((row) => {
+    const titleEl = row.querySelector('[title], [class*="source-title"], .source-title, [class*="source-name"], [class*="title"]');
+    let title = titleEl ? (titleEl.getAttribute('title') || titleEl.textContent || '').trim() : '';
+    if (!title) title = (row.textContent || '').trim();
     if (!title) return;
-    extractSourceKeysFromText(title).forEach((key) => {
-      if (!sourceKeyToIds.has(key)) sourceKeyToIds.set(key, new Set());
-    });
-    const candidates = [
+
+    // UUID del row: atributos data-*, href, aria-label, o texto.
+    const uuidCandidates = [
       row.getAttribute('data-source-id'),
+      row.getAttribute('data-id'),
+      row.getAttribute('source-id'),
+      row.getAttribute('href'),
+      row.getAttribute('aria-label'),
       row.querySelector('[data-source-id]')?.getAttribute('data-source-id'),
-    ];
-    const uuidInRow = title.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
-    if (uuidInRow) candidates.push(uuidInRow[0]);
-    const sourceId = candidates.find(isUuid);
-    if (sourceId) registerSourceId(sourceId, title);
+      row.querySelector('[data-id]')?.getAttribute('data-id'),
+    ].filter(Boolean);
+    const textUuid = (row.textContent || '').match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+    if (textUuid) uuidCandidates.push(textUuid[0]);
+    const sourceId = uuidCandidates.find(isUuid);
+
+    if (sourceId) {
+      registerSourceId(sourceId, title);
+      return;
+    }
+    // Sin UUID en el row: enlazar por clave. Si "063.md" -> clave "T063" y
+    // esa clave ya esta mapeada a un sourceId via los titulos de artefactos,
+    // registramos el titulo real para ese sourceId. Si no hay mapeo, al menos
+    // reservamos la clave para futuros enlaces.
+    extractSourceKeysFromText(title).forEach((key) => {
+      const ids = sourceKeyToIds.get(key);
+      if (ids && ids.size) {
+        ids.forEach((id) => registerSourceId(id, title));
+      } else if (!sourceKeyToIds.has(key)) {
+        sourceKeyToIds.set(key, new Set());
+      }
+    });
   });
 }
 
@@ -621,12 +647,6 @@ function getArtifactSourceIds(item) {
   return (cached && cached.sourceIds) || [];
 }
 
-function sourceDisplayLabel(sourceId) {
-  const title = sourceTitleById.get(sourceId);
-  if (title) return title.replace(/\.[a-z0-9]{1,5}$/i, '');
-  return 'Fuente ' + sourceId.slice(0, 8);
-}
-
 function getTitle(item) {
   const titleEl = item.querySelector('.artifact-title, [class*="artifact-title"]');
   return titleEl ? titleEl.textContent.trim() : '';
@@ -647,39 +667,45 @@ function getDisplayStudyTypes(items) {
   return [ALL_TYPES_KEY, ...Array.from(merged).filter((t) => t !== ALL_TYPES_KEY).sort()];
 }
 
-function addSourceFallbackEntries(set, sourceIds) {
-  const prefix = FILTER_CORE ? FILTER_CORE.SOURCE_ID_PREFIX : 'ID:';
-  (sourceIds || []).forEach((sourceId) => {
-    const key = prefix + sourceId;
-    if (!set.has(key)) set.set(key, sourceDisplayLabel(sourceId));
-  });
+function sourceDisplayLabel(sourceId) {
+  const title = sourceTitleById.get(sourceId);
+  if (title) return title;
+  return 'Fuente ' + sourceId.slice(0, 8);
 }
 
 function getSourcesWithArtifacts(items) {
-  const set = new Map();
+  const sourceIds = new Set();
   for (const meta of artifactMetaCache.values()) {
-    const keys = meta.sourceKeys?.size ? meta.sourceKeys : sourceKeysForIds(meta.sourceIds);
-    if (keys.size) {
-      keys.forEach((key) => set.set(key, key.replace(/^T/i, '')));
-    } else {
-      // No se pudo derivar una clave tipo "T047" del titulo de la fuente
-      // (p.ej. nombres sin numero, o titulo aun no capturado). En vez de
-      // omitir la fuente en silencio, se muestra un chip identificado por
-      // su UUID real para que siga siendo seleccionable.
-      addSourceFallbackEntries(set, meta.sourceIds);
-    }
+    (meta.sourceIds || []).forEach((id) => sourceIds.add(id));
   }
   for (const item of items) {
-    const itemKeys = getArtifactSourceKeys(item);
-    if (itemKeys.size) {
-      itemKeys.forEach((key) => set.set(key, key.replace(/^T/i, '')));
+    getArtifactSourceIds(item).forEach((id) => sourceIds.add(id));
+  }
+  const prefix = FILTER_CORE ? FILTER_CORE.SOURCE_ID_PREFIX : 'ID:';
+  const result = [];
+  const seenKey = new Set();
+  for (const sourceId of sourceIds) {
+    const keys = sourceKeysForIds([sourceId]);
+    if (keys.size) {
+      const key = Array.from(keys).sort()[0];
+      if (seenKey.has(key)) continue;
+      seenKey.add(key);
+      // Mostrar el titulo completo (p.ej. "063.md") solo cuando la clave
+      // representa a una unica fuente con titulo conocido; si varias fuentes
+      // comparten la misma clave (p.ej. ESTUDIO + EXAMEN del mismo tema) se
+      // muestra el numero de tema para no elegir un titulo arbitrario.
+      const idsForKey = sourceKeyToIds.get(key);
+      const singleTitle = idsForKey && idsForKey.size === 1
+        ? sourceTitleById.get(Array.from(idsForKey)[0])
+        : '';
+      result.push({ src: key, display: singleTitle || key.replace(/^T/i, '') });
     } else {
-      addSourceFallbackEntries(set, getArtifactSourceIds(item));
+      // Sin clave derivable: si hay titulo real (p.ej. "Informe_..._Obsoleta.md")
+      // se muestra; si no, fallback por UUID para seguir siendo seleccionable.
+      result.push({ src: prefix + sourceId, display: sourceDisplayLabel(sourceId) });
     }
   }
-  return Array.from(set.entries())
-    .sort((a, b) => a[1].localeCompare(b[1], undefined, { numeric: true }))
-    .map(([src, display]) => ({ src, display }));
+  return result.sort((a, b) => a.display.localeCompare(b.display, undefined, { numeric: true }));
 }
 
 function getAllSources(items) {
