@@ -53,7 +53,7 @@ La extensión **no está publicada en la Chrome Web Store**; se carga como exten
 
 1. Descarga el repositorio a una carpeta local, por ejemplo:
    ```bash
-   git clone https://github.com/T603474/Notebook-Filter.git
+   git clone https://github.com/T603474/NotebookLM-Study-Filters.git
    ```
    (o descomprime el ZIP en una carpeta y recuerda su ruta).
 
