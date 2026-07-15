@@ -217,6 +217,12 @@ function injectStyles() {
       gap: 6px;
       margin-bottom: 6px;
     }
+    .nl-filter-divider {
+      border: none;
+      border-top: 1px solid #3c4043;
+      margin: 8px 0 10px;
+      width: 100%;
+    }
     .nl-search {
       width: 100%;
       box-sizing: border-box;
@@ -764,7 +770,8 @@ function buildFilterHTML(studyTypes, selectedStudyMap, sourceTypes, selectedSour
     '<div class="nl-filter-label">Tipo de contenido</div>' +
     '<input type="search" class="nl-search" data-nl-search placeholder="Buscar guías..." />' +
     '<div class="nl-filter-row" data-nl-row>' + studyChips + '</div>' +
-    '<div class="nl-filter-label">Fuente</div>' +
+    '<hr class="nl-filter-divider" />' +
+    '<div class="nl-filter-label">Fuentes</div>' +
     '<input type="search" class="nl-search" data-nl-source-search placeholder="Buscar fuente (ej: 047.md)..." />' +
     sourceRow
   );
