@@ -17,7 +17,7 @@
     },
     {
       "matches": ["https://notebooklm.google.com/*"],
-      "js": ["filter-core.js", "content.js"],
+      "js": ["site-access.js", "filter-core.js", "content.js"],
       "run_at": "document_start"
     }
   ],

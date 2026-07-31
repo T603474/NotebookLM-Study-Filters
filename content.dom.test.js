@@ -16,6 +16,7 @@ const path = require('node:path');
 const vm = require('node:vm');
 const { JSDOM } = require('jsdom');
 
+const SITE_ACCESS_SRC = fs.readFileSync(path.join(__dirname, 'site-access.js'), 'utf8');
 const FILTER_CORE_SRC = fs.readFileSync(path.join(__dirname, 'filter-core.js'), 'utf8');
 const CONTENT_SRC = fs.readFileSync(path.join(__dirname, 'content.js'), 'utf8');
 
@@ -109,6 +110,7 @@ function buildDom(opts = {}) {
 
 function loadContentScript(dom) {
   vm.createContext(dom.window);
+  vm.runInContext(SITE_ACCESS_SRC, dom.window, { filename: 'site-access.js' });
   vm.runInContext(FILTER_CORE_SRC, dom.window, { filename: 'filter-core.js' });
   vm.runInContext(CONTENT_SRC, dom.window, { filename: 'content.js' });
   return dom.window;
@@ -124,6 +126,7 @@ function loadContentScript(dom) {
 // se rompe en el navegador real aunque la busqueda de texto siga funcionando.
 function loadContentScriptWithoutCore(dom) {
   vm.createContext(dom.window);
+  vm.runInContext(SITE_ACCESS_SRC, dom.window, { filename: 'site-access.js' });
   vm.runInContext(CONTENT_SRC, dom.window, { filename: 'content.js' });
   return dom.window;
 }
@@ -147,7 +150,9 @@ function getItemByTitle(window, title) {
 }
 
 test('clicking the Audio chip hides quiz items when artifact metadata is captured correctly', async () => {
-  const dom = buildDom();
+  const dom = buildDom({
+    url: 'https://notebook.google.com/notebook/66d41b00-97bc-4f4c-a871-ba9f634f8b78',
+  });
   const window = loadContentScript(dom);
 
   await window.runOnce();

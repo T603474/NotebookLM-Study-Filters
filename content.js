@@ -1,4 +1,5 @@
-const PAGE_HOST = 'notebooklm.google.com';
+const SITE_ACCESS = globalThis.NotebookSiteAccess;
+const isNotebookPage = () => !!(SITE_ACCESS && SITE_ACCESS.isNotebookHost(location.hostname));
 const NB_ROUTE_REGEX = /\/notebook\/[A-Za-z0-9-]+/;
 const NB_ID_REGEX = /\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ALL_TYPES_KEY = '__all__';
@@ -1331,7 +1332,7 @@ async function runOnce() {
     cleanupFilterPanel();
     return;
   }
-  if (location.hostname !== PAGE_HOST) {
+  if (!isNotebookPage()) {
     cleanupFilterPanel();
     return;
   }
@@ -1406,7 +1407,7 @@ window.__nlFilterDebug = function () {
 };
 
 function main() {
-  if (location.hostname !== PAGE_HOST) return;
+  if (!isNotebookPage()) return;
   handleBridgeMetadata();
   initObserver();
   runOnce().catch(handleRunOnceFailure);
@@ -1485,4 +1486,4 @@ if (!window.__nlApplyListenerInstalled) {
 }
 
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', main);
-else if (location.hostname === PAGE_HOST) main();
+else if (isNotebookPage()) main();
