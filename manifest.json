@@ -1,22 +1,29 @@
 {
   "manifest_version": 3,
-  "name": "Filtro de Estudio para NotebookLM",
-  "version": "1.0.0",
-  "description": "Filtra tipos de estudio y fuentes en NotebookLM sin romper la SPA.",
-  "permissions": ["storage", "activeTab"],
-  "host_permissions": [
+  "name": "Filtro de Estudio para Gemini Notebook",
+  "version": "1.1.0",
+  "description": "Filtra tipos de estudio y fuentes en Gemini Notebook (antes NotebookLM) sin romper la SPA.",
+  "permissions": ["storage", "activeTab", "scripting"],
+  "optional_host_permissions": [
+    "https://notebook.google.com/*",
     "https://notebooklm.google.com/*",
     "https://accounts.google.com/*"
   ],
   "content_scripts": [
     {
-      "matches": ["https://notebooklm.google.com/*"],
+      "matches": [
+        "https://notebook.google.com/*",
+        "https://notebooklm.google.com/*"
+      ],
       "js": ["filter-core.js", "page-bridge.js"],
       "run_at": "document_start",
       "world": "MAIN"
     },
     {
-      "matches": ["https://notebooklm.google.com/*"],
+      "matches": [
+        "https://notebook.google.com/*",
+        "https://notebooklm.google.com/*"
+      ],
       "js": ["site-access.js", "filter-core.js", "content.js"],
       "run_at": "document_start"
     }
@@ -35,7 +42,10 @@
   "web_accessible_resources": [
     {
       "resources": ["icon16.png", "icon48.png", "icon128.png"],
-      "matches": ["https://notebooklm.google.com/*"]
+      "matches": [
+        "https://notebook.google.com/*",
+        "https://notebooklm.google.com/*"
+      ]
     }
   ]
 }
