@@ -1,4 +1,4 @@
-# Contribuir a Filtro de Estudio para NotebookLM
+# Contribuir a Filtro de Estudio para Gemini Notebook
 
 Gracias por tu interés en mejorar esta extensión. Es un proyecto pequeño y ligero (sin bundler, sin dependencias en runtime); agradecemos que se mantenga así.
 
@@ -6,7 +6,7 @@ Gracias por tu interés en mejorar esta extensión. Es un proyecto pequeño y li
 
 1. Clona el repo.
 2. Carga la extensión sin empaquetar en Edge (`edge://extensions` → modo desarrollador → "Cargar extensión descomprimida") o Chrome (`chrome://extensions` → "Cargar descomprimida"), apuntando a la carpeta del proyecto.
-3. Abre un notebook en NotebookLM y entra en la pestaña **Studio**; debería aparecer el panel "Filtros".
+3. Abre un notebook en Gemini Notebook (`notebook.google.com` o `notebooklm.google.com`) y entra en la pestaña **Studio**; debería aparecer el panel "Filtros" si has concedido acceso al sitio.
 
 ## Tests
 
@@ -14,10 +14,10 @@ Requisito: Node.js 20+.
 
 ```bash
 npm install      # instala jsdom (dev)
-npm test         # ejecuta filter-core.test.js, content.dom.test.js y popup.test.js
+npm test         # filter-core, content.dom, popup y site-access
 ```
 
-Los tests usan `node:test` y `jsdom`. `content.dom.test.js` ejecuta la canalización real de filtrado contra un DOM simulado con datos reales de un notebook (UUIDs, `typeCode` y títulos obtenidos vía MCP). Cualquier cambio de comportamiento debe ir acompañado de un test que lo cubra.
+Los tests usan `node:test` y `jsdom`. `content.dom.test.js` ejecuta la canalización real de filtrado contra un DOM simulado con datos reales de un notebook (UUIDs, `typeCode` y títulos obtenidos vía MCP). `site-access.test.js` cubre los helpers compartidos de hosts y permisos en `site-access.js`. `popup.test.js` incluye el flujo de acceso a sitios y el primer prompt de presets. Cualquier cambio de comportamiento debe ir acompañado de un test que lo cubra.
 
 ## Convención de versionado
 
@@ -37,8 +37,9 @@ Los tests usan `node:test` y `jsdom`. `content.dom.test.js` ejecuta la canalizac
 
 ## Notas de arquitectura
 
-- **Mundos MV3**: `page-bridge.js` corre en el mundo MAIN (intercepta `batchexecute`); `content.js` en el ISOLATED (panel, filtrado, `chrome.storage`); `filter-core.js` compartido.
-- **`FILTER_CORE`**: `content.js` resuelve `globalThis.NotebookFilterCore || INLINE_FILTER_CORE`. El fallback inline es vital: en algunos navegales la global compartida entre ficheros del mismo `content_scripts` no está disponible, y sin el fallback el filtrado por tipo y por fuente deja de funcionar (la búsqueda de texto, que no usa `FILTER_CORE`, seguiría funcionando). No eliminar el fallback.
+- **Mundos MV3**: `page-bridge.js` corre en el mundo MAIN (intercepta `batchexecute`); `content.js` en el ISOLATED (panel, filtrado, `chrome.storage`); `filter-core.js` y `site-access.js` compartidos.
+- **`site-access.js`**: expone `NotebookSiteAccess` (hosts de notebook, presets, normalización de patrones custom). Se carga vía `importScripts` en `background.js`, como `<script>` en el popup y como primera entrada en el content script ISOLATED.
+- **`FILTER_CORE`**: `content.js` resuelve `globalThis.NotebookFilterCore || INLINE_FILTER_CORE`. El fallback inline es vital: en algunos navegadores la global compartida entre ficheros del mismo `content_scripts` no está disponible, y sin el fallback el filtrado por tipo y por fuente deja de funcionar (la búsqueda de texto, que no usa `FILTER_CORE`, seguiría funcionando). No eliminar el fallback.
 - **Almacenamiento por notebook**: las claves son `studyTypes:<notebookId>`, `sourceTypes:<notebookId>`, `collapsed:<notebookId>`. El popup usa las mismas claves (extrae el ID de la URL de la pestaña activa).
 
 ## Co-autoría

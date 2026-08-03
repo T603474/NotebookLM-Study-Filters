@@ -1,8 +1,8 @@
-# Filtro de Estudio para NotebookLM
+# Filtro de Estudio para Gemini Notebook
 
-Extensión de navegador (Manifest V3) para **Microsoft Edge** y **Google Chrome** que añade un panel de filtros dentro de la pestaña **Studio** de [NotebookLM](https://notebooklm.google.com), permitiendo filtrar las herramientas de estudio generadas (audios, presentaciones, tests, infografías, etc.) **por tipo de contenido** y **por fuente**, sin romper la SPA de NotebookLM.
+Extensión de navegador (Manifest V3) para **Microsoft Edge** y **Google Chrome** que añade un panel de filtros dentro de la pestaña **Studio** de [Gemini Notebook](https://notebook.google.com) (antes NotebookLM; algunas cuentas siguen usando [notebooklm.google.com](https://notebooklm.google.com)), permitiendo filtrar las herramientas de estudio generadas (audios, presentaciones, tests, infografías, etc.) **por tipo de contenido** y **por fuente**, sin romper la SPA.
 
-> Versión actual: **0.1.8**
+> Versión actual: **1.1.0**
 
 ---
 
@@ -11,6 +11,7 @@ Extensión de navegador (Manifest V3) para **Microsoft Edge** y **Google Chrome*
 - [Qué hace](#qué-hace)
 - [Por qué existe](#por-qué-existe)
 - [Instalación](#instalación)
+- [Acceso a sitios](#acceso-a-sitios)
 - [Uso](#uso)
 - [Cómo funciona (arquitectura)](#cómo-funciona-arquitectura)
 - [Tipos de contenido reconocidos](#tipos-de-contenido-reconocidos)
@@ -25,7 +26,7 @@ Extensión de navegador (Manifest V3) para **Microsoft Edge** y **Google Chrome*
 
 ## Qué hace
 
-Cuando abres un notebook en NotebookLM y entras en la pestaña **Studio**, la extensión inyecta un panel "Filtros" entre los botones de creación y la lista de herramientas generadas. El panel ofrece:
+Cuando abres un notebook en Gemini Notebook y entras en la pestaña **Studio**, la extensión inyecta un panel "Filtros" entre los botones de creación y la lista de herramientas generadas. El panel ofrece:
 
 - **Buscador de guías** (por texto): filtra las herramientas cuyo título o detalles contienen el texto escrito.
 - **Tipo de contenido**: chips para cada tipo detectado (`Todos`, `Audio`, `Briefing`, `Tarjetas`, `Tabla de datos`, `Guía`, `Infografía`, `Mapa`, `Presentación`, `Test`, `Informes`, `Vídeo`…). Selecciona uno (o varios) para acotar la lista.
@@ -35,7 +36,7 @@ Los filtros se combinan con semántica **Y** (un artefacto debe cumplir todas la
 
 ## Por qué existe
 
-NotebookLM lista en Studio todas las herramientas generadas de todas las fuentes juntas, sin forma de acotar por tipo ni por fuente. Cuando un notebook tiene decenas de fuentes y se han creado audios, tests, infografías, etc. para cada una, encontrar lo que buscas requiere mucho *scroll*. Esta extensión añade el filtrado que NotebookLM no trae de fábrica, respetando su DOM y sin interceptar ni alterar las llamadas de red de forma destructiva.
+Gemini Notebook lista en Studio todas las herramientas generadas de todas las fuentes juntas, sin forma de acotar por tipo ni por fuente. Cuando un notebook tiene decenas de fuentes y se han creado audios, tests, infografías, etc. para cada una, encontrar lo que buscas requiere mucho *scroll*. Esta extensión añade el filtrado que Gemini Notebook no trae de fábrica, respetando su DOM y sin interceptar ni alterar las llamadas de red de forma destructiva.
 
 ---
 
@@ -46,7 +47,7 @@ La extensión **no está publicada en la Chrome Web Store**; se carga como exten
 ### Requisitos
 
 - Microsoft Edge o Google Chrome.
-- Una cuenta de Google con acceso a NotebookLM.
+- Una cuenta de Google con acceso a Gemini Notebook.
 - Los ficheros de este repositorio descargados en tu equipo (clonar el repo o descargar el ZIP y descomprimirlo).
 
 ### Paso a paso (Microsoft Edge)
@@ -63,9 +64,9 @@ La extensión **no está publicada en la Chrome Web Store**; se carga como exten
 
 4. Pulsa **Cargar extensión descomprimida** y selecciona la carpeta del proyecto (la que contiene `manifest.json`).
 
-5. La extensión **Filtro de Estudio para NotebookLM** aparecerá en la lista. Asegúrate de que está **activada**.
+5. La extensión **Filtro de Estudio para Gemini Notebook** aparecerá en la lista. Asegúrate de que está **activada**.
 
-6. Abre (o recarga) una pestaña con un notebook de NotebookLM y entra en la pestaña **Studio**. Deberías ver el panel "Filtros" entre los botones de creación y la lista de herramientas.
+6. Abre (o recarga) una pestaña con un notebook de Gemini Notebook y entra en la pestaña **Studio**. Deberías ver el panel "Filtros" entre los botones de creación y la lista de herramientas.
 
 ### Paso a paso (Google Chrome)
 
@@ -77,10 +78,18 @@ Cuando se incorporen cambios al repositorio:
 
 1. `edge://extensions` (o `chrome://extensions`).
 2. Pulsa **Volver a cargar** en la tarjeta de la extensión.
-3. **Cierra y vuelve a abrir** la pestaña de NotebookLM (no basta con refrescar: la SPA mantiene en memoria el estado anterior y el content script debe reinicializarse).
+3. **Cierra y vuelve a abrir** la pestaña de Gemini Notebook (no basta con refrescar: la SPA mantiene en memoria el estado anterior y el content script debe reinicializarse).
 4. Verifica en el panel que la versión mostrada (`Filtros · vX.Y.Z`) es la esperada.
 
-> Si tras actualizar la extensión dejas la pestaña de NotebookLM abierta, es normal que aparezca un error "Extension context invalidated" en la página de la extensión: la instancia anterior del content script queda huérfana. Cerrar y reabrir la pestaña lo resuelve. La extensión está blindada frente a este caso y se desactiva limpiamente sin dejar timers ni observadores activos.
+> Si tras actualizar la extensión dejas la pestaña de Gemini Notebook abierta, es normal que aparezca un error "Extension context invalidated" en la página de la extensión: la instancia anterior del content script queda huérfana. Cerrar y reabrir la pestaña lo resuelve. La extensión está blindada frente a este caso y se desactiva limpiamente sin dejar timers ni observadores activos.
+
+### Acceso a sitios
+
+Los permisos de host son **opcionales**: la extensión funciona en `notebook.google.com` y `notebooklm.google.com` solo cuando concedas acceso a esos sitios.
+
+La primera vez que abras el popup de la extensión, se te pedirá conceder los tres presets (`notebook.google.com`, `notebooklm.google.com` y `accounts.google.com`). Puedes activarlos o desactivarlos en cualquier momento desde el propio popup.
+
+Si necesitas un host adicional (p. ej. un dominio de Google Workspace), añádelo desde el popup o en `edge://extensions` / `chrome://extensions` → **Acceso a sitios** de la extensión.
 
 ---
 
@@ -89,7 +98,7 @@ Cuando se incorporen cambios al repositorio:
 El panel "Filtros" tiene esta estructura:
 
 ```
-Filtros · v0.1.8                              Limpiar
+Filtros · v1.1.0                              Limpiar
 ─────────────────────────────────────────────
 TIPO DE CONTENIDO
   [ Buscar guías... ]
@@ -124,21 +133,21 @@ FUENTES
 
 ### Popup de la extensión
 
-Además del panel in-page, al pulsar el icono de la extensión en la barra de herramientas se abre un popup con los mismos chips de tipo y de fuente. Lo que cambies en el popup se aplica a la pestaña activa de NotebookLM y se sincroniza con el panel in-page (y viceversa).
+Además del panel in-page, al pulsar el icono de la extensión en la barra de herramientas se abre un popup con los mismos chips de tipo y de fuente. Lo que cambies en el popup se aplica a la pestaña activa de Gemini Notebook y se sincroniza con el panel in-page (y viceversa).
 
 ---
 
 ## Cómo funciona (arquitectura)
 
-La extensión intercepta las llamadas internas que NotebookLM hace a su backend (`batchexecute`) para obtener los **metadatos reales** de cada artefacto: su tipo y los UUIDs de las fuentes a las que está vinculado. Esto evita depender de heurísticas frágiles sobre el texto del título.
+La extensión intercepta las llamadas internas que Gemini Notebook hace a su backend (`batchexecute`) para obtener los **metadatos reales** de cada artefacto: su tipo y los UUIDs de las fuentes a las que está vinculado. Esto evita depender de heurísticas frágiles sobre el texto del título.
 
-- **`page-bridge.js`** se inyecta en el **mundo MAIN** de la página (el mismo contexto de JS que NotebookLM) y envuelve `fetch` y `XMLHttpRequest` para capturar las respuestas `batchexecute`, extraer fuentes y artefactos, y comunicarlos al content script mediante un atributo en `<html>` y un evento `nl-filter-api-metadata`.
+- **`page-bridge.js`** se inyecta en el **mundo MAIN** de la página (el mismo contexto de JS que Gemini Notebook) y envuelve `fetch` y `XMLHttpRequest` para capturar las respuestas `batchexecute`, extraer fuentes y artefactos, y comunicarlos al content script mediante un atributo en `<html>` y un evento `nl-filter-api-metadata`.
 - **`content.js`** se inyecta en el **mundo ISOLATED** (donde tiene acceso a la API de extensiones, `chrome.storage`, etc.). Recibe los metadatos del bridge, construye y mantiene el panel de filtros, enlaza cada elemento del DOM con sus metadatos, y aplica la visibilidad.
 - **`filter-core.js`** es un módulo de funciones puras (normalización de consultas, extracción de claves de fuente, *matching*) compartido por ambos mundos.
 - **`background.js`** es el *service worker* que reenvía mensajes del popup a la pestaña activa.
 - **`popup.html` / `popup.js`** implementan la interfaz de la barra de herramientas.
 
-El filtrado por tipo es robusto frente a un `typeCode` erróneo o compartido en la respuesta RPC: se priorizan las señales visuales que la propia UI de NotebookLM renderiza (icono, botón de reproducción) antes que el campo numérico de la respuesta. El filtrado por fuente deriva la clave legible (p. ej. `041`) del título de la fuente cuando está disponible, o del título del artefacto (`T041 - Audio - Test`) como respaldo. Solo si no se puede derivar ninguna clave, el chip muestra el UUID abreviado (`Fuente 1fce7372`) para que la fuente siga siendo seleccionable en vez de desaparecer.
+El filtrado por tipo es robusto frente a un `typeCode` erróneo o compartido en la respuesta RPC: se priorizan las señales visuales que la propia UI de Gemini Notebook renderiza (icono, botón de reproducción) antes que el campo numérico de la respuesta. El filtrado por fuente deriva la clave legible (p. ej. `041`) del título de la fuente cuando está disponible, o del título del artefacto (`T041 - Audio - Test`) como respaldo. Solo si no se puede derivar ninguna clave, el chip muestra el UUID abreviado (`Fuente 1fce7372`) para que la fuente siga siendo seleccionable en vez de desaparecer.
 
 ---
 
@@ -163,7 +172,8 @@ El filtrado por tipo es robusto frente a un `typeCode` erróneo o compartido en 
 ## Resolución de problemas
 
 **El panel no aparece**
-- Confirma que estás en `https://notebooklm.google.com/notebook/<id>` y en la pestaña **Studio**.
+- Confirma que estás en `https://notebook.google.com/notebook/<id>` (o `https://notebooklm.google.com/notebook/<id>`) y en la pestaña **Studio**.
+- Comprueba que has concedido acceso al sitio en el popup o en **Acceso a sitios** de la extensión.
 - Cierra y vuelve a abrir la pestaña (la extensión se inicializa al cargar).
 - En `edge://extensions` confirma que la extensión está activada y que la versión mostrada es la esperada.
 
@@ -175,13 +185,13 @@ El filtrado por tipo es robusto frente a un `typeCode` erróneo o compartido en 
 - Significa que para esas fuentes no se pudo derivar el número de tema ni del título de la fuente ni del título de ningún artefacto (p. ej. fuentes con nombres sin numeración). Siguen siendo seleccionables por su UUID. Para fuentes con numeración (`041.md`, `Tema41_...`), el chip muestra el número.
 
 **Error "Extension context invalidated" en la página de extensiones**
-- Es esperado si recargaste la extensión sin cerrar la pestaña de NotebookLM. Cierra y reabre la pestaña. La extensión está blindada frente a este caso y se desactiva limpiamente.
+- Es esperado si recargaste la extensión sin cerrar la pestaña de Gemini Notebook. Cierra y reabre la pestaña. La extensión está blindada frente a este caso y se desactiva limpiamente.
 
 ---
 
 ## Diagnóstico desde la consola
 
-Con DevTools abierto en la pestaña de NotebookLM (contexto de la extensión), ejecuta:
+Con DevTools abierto en la pestaña de Gemini Notebook (contexto de la extensión), ejecuta:
 
 ```js
 __nlFilterDebug();
@@ -217,7 +227,9 @@ npm test
 La suite incluye:
 
 - `filter-core.test.js`: pruebas unitarias de la lógica pura (normalización de consultas de fuente, extracción de claves, *matching* de filtros, parseo de respuestas `batchexecute`, detección de filas fuente vs. artefacto, *snapshots* de metadatos, detección del error "Extension context invalidated").
-- `content.dom.test.js`: pruebas de integración con jsdom que ejecutan la canalización real (`clic en chip → readPressedFilters → applyFilters → ocultar/mostrar`) contra un DOM simulado con datos reales de un notebook (UUIDs, `typeCode` y títulos obtenidos vía MCP de NotebookLM). Incluye un test de regresión que carga `content.js` **sin** `filter-core.js` para verificar que el fallback inline mantiene el filtrado cuando la global no está disponible (escenario observado en Edge real).
+- `content.dom.test.js`: pruebas de integración con jsdom que ejecutan la canalización real (`clic en chip → readPressedFilters → applyFilters → ocultar/mostrar`) contra un DOM simulado con datos reales de un notebook (UUIDs, `typeCode` y títulos obtenidos vía MCP de Gemini Notebook). Incluye un test de regresión que carga `content.js` **sin** `filter-core.js` para verificar que el fallback inline mantiene el filtrado cuando la global no está disponible (escenario observado en Edge real).
+- `site-access.test.js`: pruebas unitarias de los helpers de hosts y permisos (`site-access.js`).
+- `popup.test.js`: pruebas del popup, incluido el flujo de acceso a sitios y el primer prompt de presets.
 
 ---
 
@@ -234,8 +246,11 @@ La suite incluye:
 ├── popup.js               # Lógica del popup
 ├── styles.css             # Estilos (referencia; los del panel in-page están inline en content.js)
 ├── icon16.png icon48.png icon128.png
+├── site-access.js         # Helpers compartidos de hosts y permisos opcionales
 ├── filter-core.test.js    # Tests unitarios de filter-core
 ├── content.dom.test.js    # Tests de integración DOM con jsdom
+├── site-access.test.js    # Tests unitarios de site-access
+├── popup.test.js          # Tests del popup y acceso a sitios
 ├── package.json           # Dependencias de desarrollo (jsdom) y script de test
 └── .gitignore
 ```
@@ -244,6 +259,7 @@ La suite incluye:
 
 ## Historial de versiones
 
+- **1.1.0** — Renombrado a Gemini Notebook; permisos de host opcionales (`optional_host_permissions`), popup de acceso a sitios y soporte de hosts personalizados.
 - **0.1.1** — Interceptación de `batchexecute` para tipo/fuente real y panel de filtros in-page.
 - **0.1.2** — Fuentes de respaldo por UUID y clasificación de filas fuente/artefacto más robusta.
 - **0.1.3** — Blindaje frente al error "Extension context invalidated" (teardown limpio).
@@ -261,4 +277,4 @@ La suite incluye:
 
 Permiso para usar, copiar, modificar, fusionar, publicar, distribuir, sublicenciar y/o vender copias del software, y para permitir a las personas a las que se les proporcione hacerlo, bajo la única condición de conservar el aviso de copyright y este aviso de permiso en todas las copias o partes sustanciales del software.
 
-Esta extensión no está afiliada a Google ni a NotebookLM.
+Esta extensión no está afiliada a Google ni a Gemini Notebook.
