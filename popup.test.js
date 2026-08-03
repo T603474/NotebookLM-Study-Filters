@@ -193,6 +193,40 @@ test('normalize + Añadir guarda customHostPatterns y llama sync-custom-scripts'
   assert.ok(window.__popupTest.sentMessages.some((msg) => msg.type === 'sync-custom-scripts'));
 });
 
+test('un fallo sincrono al conceder permiso (add-handler) muestra un mensaje en vez de fallar en silencio', async () => {
+  // Revision final v1.1.0 (Important 5): chrome.permissions.request() puede
+  // lanzar de forma sincrona en el navegador real (p. ej. "may only be
+  // called from a user gesture" o contexto invalidado). Antes, eso dejaba
+  // una promesa rechazada sin manejar dentro del listener async del boton
+  // "Añadir": el usuario no recibia ningun mensaje ("permission failures
+  // silent"). Forzamos ese throw y comprobamos que ahora se informa.
+  const store = { siteAccessPrompted: true };
+  const window = loadPopup(buildPopupDom(
+    store,
+    'https://notebook.google.com/notebook/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+    { sources: [], studyTypes: [] }
+  ));
+
+  await tick(60);
+  window.chrome.permissions.request = () => {
+    throw new Error('Permissions.request may only be called from a user gesture');
+  };
+
+  const input = window.document.getElementById('siteAccessInput');
+  input.value = 'otroejemplo.com';
+  window.document.getElementById('siteAccessAdd')
+    .dispatchEvent(new window.Event('click', { bubbles: true }));
+  await tick(60);
+
+  assert.equal(
+    window.document.getElementById('siteAccessStatus').textContent,
+    'No se pudo conceder el acceso',
+    'un fallo sincrono al conceder el permiso debe mostrarse al usuario, no fallar en silencio'
+  );
+  assert.deepEqual(Array.from(store.customHostPatterns || []), [],
+    'no debe guardarse el host si no se pudo conceder el permiso');
+});
+
 test('Quitar elimina un custom sin permiso y llama sync-custom-scripts', async () => {
   const origin = 'https://ejemplo.com/*';
   const store = { siteAccessPrompted: true, customHostPatterns: [origin] };

@@ -60,9 +60,18 @@ document.addEventListener('DOMContentLoaded', () => {
       resolve(false);
       return;
     }
-    chromeApi.permissions[action]({ origins: [origin] }, (result) => {
-      resolve(!chromeApi.runtime.lastError && result !== false);
-    });
+    try {
+      chromeApi.permissions[action]({ origins: [origin] }, (result) => {
+        resolve(!chromeApi.runtime.lastError && result !== false);
+      });
+    } catch (_) {
+      // chrome.permissions.request()/remove() pueden lanzar de forma
+      // sincrona (p. ej. "may only be called from a user gesture" o el
+      // contexto de la extension invalidado). Sin este try/catch, el fallo
+      // quedaba como una promesa rechazada sin manejar: el popup no
+      // informaba de nada al usuario ("permission failures silent").
+      resolve(false);
+    }
   });
 
   const containsOrigin = (origin) => permissionAction('contains', origin);
@@ -123,8 +132,12 @@ document.addEventListener('DOMContentLoaded', () => {
     button.textContent = custom || granted ? 'Quitar' : 'Conceder';
     button.setAttribute('aria-pressed', granted ? 'true' : 'false');
     button.addEventListener('click', async () => {
-      await toggleOrigin(origin, custom ? false : !granted);
-      await renderSiteAccess();
+      try {
+        await toggleOrigin(origin, custom ? false : !granted);
+        await renderSiteAccess();
+      } catch (_) {
+        if (siteAccessStatus) siteAccessStatus.textContent = 'No se pudo conceder el acceso';
+      }
     });
     row.append(label, button);
     if (custom) row.setAttribute('data-custom-origin', origin);
@@ -178,9 +191,14 @@ document.addEventListener('DOMContentLoaded', () => {
         siteAccessStatus.textContent = 'Patrón inválido (usa https://host)';
         return;
       }
-      const granted = await toggleOrigin(origin, true);
-      if (granted) siteAccessInput.value = '';
-      await renderSiteAccess();
+      try {
+        const granted = await toggleOrigin(origin, true);
+        if (granted) siteAccessInput.value = '';
+        await renderSiteAccess();
+        if (!granted) siteAccessStatus.textContent = 'No se pudo conceder el acceso';
+      } catch (_) {
+        siteAccessStatus.textContent = 'No se pudo conceder el acceso';
+      }
     });
   }
 
