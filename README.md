@@ -11,7 +11,7 @@ Extensión de navegador (Manifest V3) para **Microsoft Edge** y **Google Chrome*
 - [Qué hace](#qué-hace)
 - [Por qué existe](#por-qué-existe)
 - [Instalación](#instalación)
-- [Acceso a sitios](#acceso-a-sitios)
+  - [Acceso a sitios](#acceso-a-sitios)
 - [Uso](#uso)
 - [Cómo funciona (arquitectura)](#cómo-funciona-arquitectura)
 - [Tipos de contenido reconocidos](#tipos-de-contenido-reconocidos)
@@ -66,7 +66,9 @@ La extensión **no está publicada en la Chrome Web Store**; se carga como exten
 
 5. La extensión **Filtro de Estudio para Gemini Notebook** aparecerá en la lista. Asegúrate de que está **activada**.
 
-6. Abre (o recarga) una pestaña con un notebook de Gemini Notebook y entra en la pestaña **Studio**. Deberías ver el panel "Filtros" entre los botones de creación y la lista de herramientas.
+6. Pulsa el icono de la extensión en la barra de herramientas para abrir el popup **una vez**: al ser permisos opcionales (ver [Acceso a sitios](#acceso-a-sitios)), el popup te pedirá conceder acceso a los tres presets de sitios (`notebook.google.com`, `notebooklm.google.com`, `accounts.google.com`). Acéptalo.
+
+7. Abre (o recarga) una pestaña con un notebook de Gemini Notebook y entra en la pestaña **Studio**. Deberías ver el panel "Filtros" entre los botones de creación y la lista de herramientas.
 
 ### Paso a paso (Google Chrome)
 
@@ -89,7 +91,9 @@ Los permisos de host son **opcionales**: la extensión funciona en `notebook.goo
 
 La primera vez que abras el popup de la extensión, se te pedirá conceder los tres presets (`notebook.google.com`, `notebooklm.google.com` y `accounts.google.com`). Puedes activarlos o desactivarlos en cualquier momento desde el propio popup.
 
-Si necesitas un host adicional (p. ej. un dominio de Google Workspace), añádelo desde el popup o en `edge://extensions` / `chrome://extensions` → **Acceso a sitios** de la extensión.
+Si necesitas un host adicional (p. ej. un dominio de Google Workspace), añádelo desde el popup escribiéndolo en el campo de texto y pulsando **Añadir**. Como ese host no es uno de los tres presets, el navegador mostrará un cuadro de diálogo **genérico** ("¿Permitir que la extensión acceda a los datos de \<host\>?") en vez del texto específico de los presets; acéptalo para conceder el acceso. También puedes gestionar estos permisos en `edge://extensions` / `chrome://extensions` → **Acceso a sitios** de la extensión.
+
+> Nota: si el navegador no muestra el cuadro de permisos al abrir el popup por primera vez (algunos navegadores exigen que la petición ocurra dentro del mismo gesto de clic que abrió el popup), concede el acceso manualmente pulsando **Conceder** junto a cada preset.
 
 ---
 
