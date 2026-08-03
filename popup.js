@@ -1,8 +1,14 @@
 document.addEventListener('DOMContentLoaded', () => {
   const chromeApi = typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local ? chrome : null;
+  const SA = globalThis.NotebookSiteAccess;
   const studyContainer = document.getElementById('studyTypes');
   const sourceContainer = document.getElementById('sourceTypes');
   const statusEl = document.getElementById('status');
+  const siteAccessStatus = document.getElementById('siteAccessStatus');
+  const siteAccessPresets = document.getElementById('siteAccessPresets');
+  const siteAccessCustom = document.getElementById('siteAccessCustom');
+  const siteAccessInput = document.getElementById('siteAccessInput');
+  const siteAccessAdd = document.getElementById('siteAccessAdd');
 
   if (!studyContainer || !sourceContainer) return;
 
@@ -27,11 +33,156 @@ document.addEventListener('DOMContentLoaded', () => {
     if (statusEl) statusEl.textContent = message;
   };
 
-  const isNotebookTab = (tab) => !!(tab && tab.url && tab.url.includes('notebooklm.google.com'));
+  const isNotebookTab = (tab) => !!(tab && SA && SA.isNotebookUrl(tab.url));
 
-  studyContainer.textContent = 'Carga NotebookLM...';
+  studyContainer.textContent = 'Carga Gemini Notebook...';
   sourceContainer.textContent = '';
   setStatus('Cargando...');
+
+  const storageGet = (keys) => new Promise((resolve) => {
+    if (!chromeApi) {
+      resolve({});
+      return;
+    }
+    chromeApi.storage.local.get(keys, (result) => resolve(result || {}));
+  });
+
+  const storageSet = (value) => new Promise((resolve) => {
+    if (!chromeApi) {
+      resolve();
+      return;
+    }
+    chromeApi.storage.local.set(value, resolve);
+  });
+
+  const permissionAction = (action, origin) => new Promise((resolve) => {
+    if (!chromeApi || !chromeApi.permissions || !chromeApi.permissions[action]) {
+      resolve(false);
+      return;
+    }
+    chromeApi.permissions[action]({ origins: [origin] }, (result) => {
+      resolve(!chromeApi.runtime.lastError && result !== false);
+    });
+  });
+
+  const containsOrigin = (origin) => permissionAction('contains', origin);
+
+  const syncCustomScripts = () => {
+    if (chromeApi && chromeApi.runtime && chromeApi.runtime.sendMessage) {
+      chromeApi.runtime.sendMessage({ type: 'sync-custom-scripts' });
+    }
+  };
+
+  const getCustomHostPatterns = async () => {
+    if (!SA) return [];
+    const stored = await storageGet(SA.STORAGE_CUSTOM_HOST_PATTERNS);
+    return Array.isArray(stored[SA.STORAGE_CUSTOM_HOST_PATTERNS])
+      ? stored[SA.STORAGE_CUSTOM_HOST_PATTERNS]
+      : [];
+  };
+
+  const setCustomHostPatterns = async (patterns) => {
+    if (!SA) return;
+    await storageSet({ [SA.STORAGE_CUSTOM_HOST_PATTERNS]: patterns });
+    syncCustomScripts();
+  };
+
+  const ensureFirstSiteAccessPrompt = async () => {
+    if (!chromeApi || !SA || !chromeApi.permissions) return;
+    const stored = await storageGet(SA.STORAGE_SITE_ACCESS_PROMPTED);
+    if (stored[SA.STORAGE_SITE_ACCESS_PROMPTED]) return;
+    try {
+      await new Promise((resolve) => {
+        chromeApi.permissions.request({ origins: SA.PRESET_ORIGINS.slice() }, resolve);
+      });
+    } finally {
+      await storageSet({ [SA.STORAGE_SITE_ACCESS_PROMPTED]: true });
+    }
+  };
+
+  const toggleOrigin = async (origin, enable) => {
+    if (!SA) return false;
+    const changed = await permissionAction(enable ? 'request' : 'remove', origin);
+    if (SA.isPresetOrigin(origin) || (enable && !changed)) return changed;
+
+    const patterns = await getCustomHostPatterns();
+    const next = enable
+      ? Array.from(new Set(patterns.concat(origin)))
+      : patterns.filter((pattern) => pattern !== origin);
+    await setCustomHostPatterns(next);
+    return enable ? changed : true;
+  };
+
+  const makeOriginRow = (origin, granted, custom) => {
+    const row = document.createElement('div');
+    row.className = 'toggle-row';
+    const label = document.createElement('span');
+    label.textContent = origin;
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = custom || granted ? 'Quitar' : 'Conceder';
+    button.setAttribute('aria-pressed', granted ? 'true' : 'false');
+    button.addEventListener('click', async () => {
+      await toggleOrigin(origin, custom ? false : !granted);
+      await renderSiteAccess();
+    });
+    row.append(label, button);
+    if (custom) row.setAttribute('data-custom-origin', origin);
+    return row;
+  };
+
+  const renderSiteAccess = async () => {
+    if (!siteAccessStatus || !siteAccessPresets || !siteAccessCustom) return;
+    siteAccessPresets.innerHTML = '';
+    siteAccessCustom.innerHTML = '';
+    if (!chromeApi || !SA || !chromeApi.permissions) {
+      siteAccessStatus.textContent = 'Acceso a sitios no disponible';
+      return;
+    }
+
+    const presetGrants = await Promise.all(
+      SA.PRESET_ORIGINS.map(async (origin) => ({
+        origin,
+        granted: await containsOrigin(origin),
+      }))
+    );
+    presetGrants.forEach(({ origin, granted }) => {
+      siteAccessPresets.appendChild(makeOriginRow(origin, granted, false));
+    });
+
+    const customPatterns = await getCustomHostPatterns();
+    const customGrants = await Promise.all(
+      customPatterns.map(async (origin) => ({
+        origin,
+        granted: await containsOrigin(origin),
+      }))
+    );
+    customGrants.forEach(({ origin, granted }) => {
+      siteAccessCustom.appendChild(makeOriginRow(origin, granted, true));
+    });
+
+    const notebookOrigins = SA.NOTEBOOK_HOSTS.map((host) => 'https://' + host + '/*');
+    const hasNotebookAccess = presetGrants.some(
+      ({ origin, granted }) => granted && notebookOrigins.includes(origin)
+    );
+    siteAccessStatus.textContent = hasNotebookAccess
+      ? 'Acceso a sitios configurado'
+      : 'Sin acceso a sitios: concede al menos un host de notebook';
+  };
+
+  if (siteAccessAdd) {
+    siteAccessAdd.addEventListener('click', async () => {
+      if (!SA || !siteAccessInput || !siteAccessStatus) return;
+      const origin = SA.normalizeHostPattern(siteAccessInput.value);
+      if (!origin) {
+        siteAccessStatus.textContent = 'Patrón inválido (usa https://host)';
+        return;
+      }
+      const granted = await toggleOrigin(origin, true);
+      if (granted) siteAccessInput.value = '';
+      await renderSiteAccess();
+    });
+  }
 
   const render = (data, activeStudy, activeSource) => {
     studyContainer.innerHTML = '';
@@ -138,7 +289,7 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
     if (!isNotebookTab(tab)) {
-      setStatus('Abre un notebook en NotebookLM');
+      setStatus('Abre un notebook en Gemini Notebook');
       return;
     }
     return new Promise((resolve) => {
@@ -178,7 +329,7 @@ document.addEventListener('DOMContentLoaded', () => {
       return { sources: [], studyTypes: [] };
     }
     if (!isNotebookTab(tab)) {
-      setStatus('Abre un notebook en NotebookLM');
+      setStatus('Abre un notebook en Gemini Notebook');
       return { sources: [], studyTypes: [] };
     }
     return new Promise((resolve) => {
@@ -186,7 +337,7 @@ document.addEventListener('DOMContentLoaded', () => {
         { type: 'forward-to-tab', tabId: tab.id, payload: { type: 'nl-get-available-sources' } },
         (response) => {
           if (chromeApi.runtime.lastError) {
-            setStatus('No se pudo conectar con NotebookLM');
+            setStatus('No se pudo conectar con Gemini Notebook');
             resolve({ sources: [], studyTypes: [] });
             return;
           }
@@ -197,6 +348,8 @@ document.addEventListener('DOMContentLoaded', () => {
   };
 
   Promise.resolve()
+    .then(() => ensureFirstSiteAccessPrompt())
+    .then(() => renderSiteAccess())
     .then(() => getActiveTab())
     .then(() => load())
     .then((stored) =>

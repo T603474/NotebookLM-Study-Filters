@@ -13,40 +13,73 @@ const vm = require('node:vm');
 const { JSDOM } = require('jsdom');
 
 const POPUP_SRC = fs.readFileSync(path.join(__dirname, 'popup.js'), 'utf8');
+const SITE_ACCESS_SRC = fs.readFileSync(path.join(__dirname, 'site-access.js'), 'utf8');
 
 function buildPopupDom(store, tabUrl, availableResponse) {
   const html = `<!doctype html><html><body>
     <div id="status"></div>
     <div id="studyTypes"></div>
     <div id="sourceTypes"></div>
+    <div id="siteAccessStatus"></div>
+    <div id="siteAccessPresets"></div>
+    <div id="siteAccessCustom"></div>
+    <input id="siteAccessInput" type="text">
+    <button type="button" id="siteAccessAdd">Añadir</button>
   </body></html>`;
   const dom = new JSDOM(html, { url: 'https://notebooklm.google.com/popup.html' });
   const window = dom.window;
+  const grantedOrigins = new Set();
+  const requestCalls = [];
+  const sentMessages = [];
   window.requestAnimationFrame = (cb) => setTimeout(cb, 0);
   window.chrome = {
     runtime: {
       id: 'test-extension-id',
       getManifest: () => ({ version: '0.0.0-test' }),
       lastError: null,
-      sendMessage: (_msg, cb) => { cb(availableResponse); },
+      sendMessage: (msg, cb) => {
+        sentMessages.push(msg);
+        if (cb) cb(msg.type === 'forward-to-tab' ? availableResponse : { ok: true });
+      },
     },
     tabs: { query: (_q, cb) => { cb([{ id: 1, url: tabUrl }]); } },
+    permissions: {
+      contains: ({ origins }, cb) => cb(origins.every((origin) => grantedOrigins.has(origin))),
+      request: ({ origins }, cb) => {
+        requestCalls.push(origins.slice());
+        origins.forEach((origin) => grantedOrigins.add(origin));
+        cb(true);
+      },
+      remove: ({ origins }, cb) => {
+        const removed = origins.every((origin) => grantedOrigins.has(origin));
+        origins.forEach((origin) => grantedOrigins.delete(origin));
+        cb(removed);
+      },
+    },
     storage: {
       local: {
         get: (keys, cb) => {
           const out = {};
-          (Array.isArray(keys) ? keys : [keys]).forEach((k) => { if (k in store) out[k] = store[k]; });
+          const requested = keys == null
+            ? Object.keys(store)
+            : Array.isArray(keys) ? keys : typeof keys === 'string' ? [keys] : Object.keys(keys);
+          requested.forEach((k) => {
+            if (k in store) out[k] = store[k];
+            else if (keys && typeof keys === 'object' && !Array.isArray(keys)) out[k] = keys[k];
+          });
           cb(out);
         },
         set: (obj, cb) => { Object.assign(store, obj); if (cb) cb(); },
       },
     },
   };
+  window.__popupTest = { grantedOrigins, requestCalls, sentMessages };
   return dom;
 }
 
 function loadPopup(dom) {
   vm.createContext(dom.window);
+  vm.runInContext(SITE_ACCESS_SRC, dom.window, { filename: 'site-access.js' });
   vm.runInContext(POPUP_SRC, dom.window, { filename: 'popup.js' });
   // jsdom ya disparo DOMContentLoaded al construir; lo redispatchamos para
   // que el listener registrado por popup.js se ejecute.
@@ -104,4 +137,79 @@ test('el popup no hereda filtros de otro notebook (aislamiento)', async () => {
     .find((b) => b.getAttribute('data-study') === 'quiz');
   assert.equal(quizBtn.getAttribute('aria-pressed'), 'false',
     'el popup en el notebook B no debe heredar el filtro guardado en el notebook A');
+});
+
+test('al primer open del popup pide los tres presets y marca siteAccessPrompted', async () => {
+  const store = {};
+  const window = loadPopup(buildPopupDom(
+    store,
+    'https://notebooklm.google.com/notebook/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+    { sources: [], studyTypes: [] }
+  ));
+
+  await tick(60);
+
+  assert.deepEqual(
+    Array.from(window.__popupTest.requestCalls[0] || []),
+    [
+      'https://notebook.google.com/*',
+      'https://notebooklm.google.com/*',
+      'https://accounts.google.com/*',
+    ]
+  );
+  assert.equal(store.siteAccessPrompted, true);
+});
+
+test('isNotebookTab acepta notebook.google.com', async () => {
+  const store = { siteAccessPrompted: true };
+  const window = loadPopup(buildPopupDom(
+    store,
+    'https://notebook.google.com/notebook/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+    { sources: [], studyTypes: ['quiz'] }
+  ));
+
+  await tick(60);
+
+  assert.notEqual(window.document.getElementById('status').textContent, 'Abre un notebook en Gemini Notebook');
+  assert.ok(window.document.querySelector('button[data-study="quiz"]'));
+});
+
+test('normalize + Añadir guarda customHostPatterns y llama sync-custom-scripts', async () => {
+  const store = { siteAccessPrompted: true };
+  const window = loadPopup(buildPopupDom(
+    store,
+    'https://notebook.google.com/notebook/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+    { sources: [], studyTypes: [] }
+  ));
+
+  await tick(60);
+  const input = window.document.getElementById('siteAccessInput');
+  input.value = 'Ejemplo.COM';
+  window.document.getElementById('siteAccessAdd')
+    .dispatchEvent(new window.Event('click', { bubbles: true }));
+  await tick(60);
+
+  assert.deepEqual(Array.from(store.customHostPatterns || []), ['https://ejemplo.com/*']);
+  assert.ok(window.__popupTest.sentMessages.some((msg) => msg.type === 'sync-custom-scripts'));
+});
+
+test('Quitar elimina un custom sin permiso y llama sync-custom-scripts', async () => {
+  const origin = 'https://ejemplo.com/*';
+  const store = { siteAccessPrompted: true, customHostPatterns: [origin] };
+  const dom = buildPopupDom(
+    store,
+    'https://notebook.google.com/notebook/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+    { sources: [], studyTypes: [] }
+  );
+  const window = loadPopup(dom);
+
+  await tick(60);
+  const removeButton = window.document
+    .querySelector(`[data-custom-origin="${origin}"] button`);
+  assert.ok(removeButton, 'debe renderizar el custom guardado');
+  removeButton.dispatchEvent(new window.Event('click', { bubbles: true }));
+  await tick(60);
+
+  assert.deepEqual(Array.from(store.customHostPatterns || []), []);
+  assert.ok(window.__popupTest.sentMessages.some((msg) => msg.type === 'sync-custom-scripts'));
 });

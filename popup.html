@@ -2,11 +2,11 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>Filtro de Estudio</title>
+  <title>Filtro de Estudio para Gemini Notebook</title>
   <style>
     body {
       font-family: 'Google Sans', Roboto, Arial, sans-serif;
-      width: 220px;
+      width: 280px;
       margin: 0;
       padding: 10px;
       color: #e8eaed;
@@ -33,12 +33,58 @@
       color: #202124;
       border-color: #8ab4f8;
     }
+    .section-label {
+      font-size: 12px;
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin: 5px 0;
+      font-size: 11px;
+    }
+    .toggle-row span {
+      overflow-wrap: anywhere;
+    }
+    .add-row {
+      display: flex;
+      gap: 6px;
+      margin-top: 7px;
+    }
+    #siteAccessInput {
+      min-width: 0;
+      flex: 1;
+      border: 1px solid #5f6368;
+      border-radius: 4px;
+      padding: 5px 6px;
+      background: #303134;
+      color: #e8eaed;
+      font-size: 11px;
+    }
+    #siteAccessStatus {
+      color: #bdc1c6;
+      font-size: 11px;
+      margin-bottom: 5px;
+    }
   </style>
 </head>
 <body>
   <div id="status">Filtro activo</div>
   <div class="row" id="studyTypes"></div>
   <div class="row" id="sourceTypes"></div>
+  <hr style="border:none;border-top:1px solid #3c4043;margin:10px 0;" />
+  <div class="section-label">Acceso a sitios</div>
+  <div id="siteAccessStatus"></div>
+  <div id="siteAccessPresets"></div>
+  <div id="siteAccessCustom"></div>
+  <div class="add-row">
+    <input id="siteAccessInput" type="text" placeholder="https://ejemplo.com/*" />
+    <button type="button" id="siteAccessAdd">Añadir</button>
+  </div>
+  <script src="site-access.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>
