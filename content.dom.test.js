@@ -131,6 +131,24 @@ function loadContentScriptWithoutCore(dom) {
   return dom.window;
 }
 
+// Mismo patron de bug que loadContentScriptWithoutCore, pero para
+// `globalThis.NotebookSiteAccess` (revision final v1.1.0, Critical 2): antes,
+// `const SITE_ACCESS = globalThis.NotebookSiteAccess` en la parte superior de
+// content.js capturaba la global UNA sola vez al evaluar el fichero. Si
+// site-access.js no llega a dejarla definida a tiempo (mismo riesgo ya
+// observado con FILTER_CORE en el navegador real en la v0.1.5), `SITE_ACCESS`
+// se queda `undefined` para siempre e `isNotebookPage()` devuelve `false` de
+// por vida: `runOnce()`/`main()` cortan en el primer `if (!isNotebookPage())`
+// y el panel de filtros nunca se instala. Carga content.js CON filter-core.js
+// pero SIN site-access.js para demostrar que el fallback inline de
+// `isNotebookPage()` mantiene la deteccion de host funcionando igualmente.
+function loadContentScriptWithoutSiteAccess(dom) {
+  vm.createContext(dom.window);
+  vm.runInContext(FILTER_CORE_SRC, dom.window, { filename: 'filter-core.js' });
+  vm.runInContext(CONTENT_SRC, dom.window, { filename: 'content.js' });
+  return dom.window;
+}
+
 async function settle(window, ticks = 6) {
   for (let i = 0; i < ticks; i += 1) {
     // eslint-disable-next-line no-await-in-loop
@@ -439,6 +457,51 @@ test('filtering still works when globalThis.NotebookFilterCore is unavailable (i
     assert.equal(t64After.hasAttribute('hidden'), true, '"063.md" debe ocultar los artefactos de otras fuentes (sintoma 3)');
   } finally {
     globalThis.NotebookFilterCore = savedCore;
+  }
+});
+
+// Regression del bug real corregido en la revision final de v1.1.0
+// (Critical 2): mismo patron que el bug de FILTER_CORE en 0.1.6, aplicado a
+// `globalThis.NotebookSiteAccess`. Reproduce el escenario cargando
+// content.js SIN site-access.js (pero CON filter-core.js) y comprueba que el
+// panel de filtros se sigue instalando y que el filtro por tipo sigue
+// funcionando en notebook.google.com gracias al fallback inline de
+// `isNotebookPage()`.
+test('filter panel still appears and type filter still works when globalThis.NotebookSiteAccess is unavailable', async () => {
+  // Igual que en el test equivalente de FILTER_CORE: se elimina la global
+  // temporalmente para reproducir fielmente "la global no esta definida",
+  // y se restaura al salir para no afectar a otros tests.
+  const savedSiteAccess = globalThis.NotebookSiteAccess;
+  delete globalThis.NotebookSiteAccess;
+  try {
+    const dom = buildDom({
+      url: 'https://notebook.google.com/notebook/66d41b00-97bc-4f4c-a871-ba9f634f8b78',
+    });
+    const window = loadContentScriptWithoutSiteAccess(dom);
+
+    assert.equal(window.NotebookSiteAccess, undefined,
+      'sanity: site-access.js no debe haberse cargado en este escenario');
+
+    await window.runOnce();
+    dispatchBridgeMetadata(window, { sources: REAL_SOURCES, artifacts: REAL_ARTIFACTS });
+    await settle(window);
+    await window.runOnce();
+
+    const panel = window.document.getElementById('nl-filter-panel');
+    assert.ok(panel, 'el panel de filtros deberia instalarse en notebook.google.com aunque NotebookSiteAccess no este definida');
+
+    const audioChip = window.document.querySelector('[data-nl-type="audio"]');
+    assert.ok(audioChip, 'el chip de Audio deberia existir en el panel');
+
+    audioChip.dispatchEvent(new window.Event('click', { bubbles: true, cancelable: true }));
+    await settle(window);
+
+    const quiz1 = getItemByTitle(window, 'T063 - Test - Test');
+    const audioItem = getItemByTitle(window, 'T66 - Audio - Test');
+    assert.equal(quiz1.hasAttribute('hidden'), true, 'con Audio activo, el quiz deberia ocultarse (el filtro por tipo debe seguir funcionando)');
+    assert.equal(audioItem.hasAttribute('hidden'), false, 'con Audio activo, el audio real deberia seguir visible');
+  } finally {
+    globalThis.NotebookSiteAccess = savedSiteAccess;
   }
 });
 

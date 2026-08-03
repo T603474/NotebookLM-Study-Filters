@@ -1,5 +1,19 @@
-const SITE_ACCESS = globalThis.NotebookSiteAccess;
-const isNotebookPage = () => !!(SITE_ACCESS && SITE_ACCESS.isNotebookHost(location.hostname));
+// site-access.js se carga ANTES que este fichero en la misma entrada de
+// content_scripts (igual que filter-core.js). Mismo bug que FILTER_CORE en
+// 0.1.6: si se captura `globalThis.NotebookSiteAccess` en un `const` de
+// nivel superior, y esa global aun no esta definida en ese instante en el
+// navegador real, se queda `undefined` para siempre y `isNotebookPage()`
+// devolveria `false` de por vida (el content script se autodesmontaria en
+// cada runOnce). Por eso se resuelve dentro del helper, en cada llamada, con
+// un fallback inline si la global no esta disponible.
+function isNotebookPage() {
+  const SA = globalThis.NotebookSiteAccess;
+  if (SA && typeof SA.isNotebookHost === 'function') {
+    return SA.isNotebookHost(location.hostname);
+  }
+  const host = String(location.hostname || '').toLowerCase();
+  return host === 'notebook.google.com' || host === 'notebooklm.google.com';
+}
 const NB_ROUTE_REGEX = /\/notebook\/[A-Za-z0-9-]+/;
 const NB_ID_REGEX = /\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ALL_TYPES_KEY = '__all__';
