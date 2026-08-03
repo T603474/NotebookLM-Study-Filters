@@ -61,41 +61,57 @@ async function unregisterPair(originPattern) {
   } catch (_) { /* ok */ }
 }
 
-async function syncCustomContentScripts() {
-  const stored = await getCustomPatterns();
-  const granted = [];
-  for (const pattern of stored) {
-    if (SA.isPresetOrigin(pattern)) continue;
-    const ok = await chrome.permissions.contains({ origins: [pattern] });
-    if (ok) {
-      granted.push(pattern);
-      await registerPair(pattern);
-    } else {
-      await unregisterPair(pattern);
+// syncCustomContentScripts se dispara desde varios eventos independientes
+// (onInstalled, onStartup, permissions.onAdded/onRemoved, el mensaje
+// "sync-custom-scripts" del popup, y el arranque del worker). Si dos
+// invocaciones se solapan (p. ej. el popup concede un permiso justo cuando
+// permissions.onAdded dispara su propia sync), ambas leen el mismo
+// `customHostPatterns` con getCustomPatterns() y luego escriben con
+// setCustomPatterns(): la que termine antes ve su escritura pisada por la
+// otra, perdiendo el host que se acababa de conceder/quitar. Se serializan
+// las invocaciones con una cadena de promesas para que cada sync espere a
+// que la anterior termine (con exito o error) antes de leer el storage.
+let syncChain = Promise.resolve();
+function syncCustomContentScripts() {
+  const run = async () => {
+    const stored = await getCustomPatterns();
+    const granted = [];
+    for (const pattern of stored) {
+      if (SA.isPresetOrigin(pattern)) continue;
+      const ok = await chrome.permissions.contains({ origins: [pattern] });
+      if (ok) {
+        granted.push(pattern);
+        await registerPair(pattern);
+      } else {
+        await unregisterPair(pattern);
+      }
     }
-  }
-  await setCustomPatterns(granted);
+    await setCustomPatterns(granted);
 
-  // Desregistrar scripts de hosts que ya no están en la lista
-  let registered = [];
-  try {
-    registered = await chrome.scripting.getRegisteredContentScripts();
-  } catch (_) {
-    registered = [];
-  }
-  const keepHosts = new Set(granted.map(hostnameFromPattern));
-  const staleIds = registered
-    .filter((s) => String(s.id || '').startsWith('nl-filter-'))
-    .filter((s) => {
-      const host = String(s.id).replace(/^nl-filter-(main|isolated)-/, '');
-      return !keepHosts.has(host);
-    })
-    .map((s) => s.id);
-  if (staleIds.length) {
+    // Desregistrar scripts de hosts que ya no están en la lista
+    let registered = [];
     try {
-      await chrome.scripting.unregisterContentScripts({ ids: staleIds });
-    } catch (_) { /* ok */ }
-  }
+      registered = await chrome.scripting.getRegisteredContentScripts();
+    } catch (_) {
+      registered = [];
+    }
+    const keepHosts = new Set(granted.map(hostnameFromPattern));
+    const staleIds = registered
+      .filter((s) => String(s.id || '').startsWith('nl-filter-'))
+      .filter((s) => {
+        const host = String(s.id).replace(/^nl-filter-(main|isolated)-/, '');
+        return !keepHosts.has(host);
+      })
+      .map((s) => s.id);
+    if (staleIds.length) {
+      try {
+        await chrome.scripting.unregisterContentScripts({ ids: staleIds });
+      } catch (_) { /* ok */ }
+    }
+  };
+  const next = syncChain.then(run, run);
+  syncChain = next.catch(() => {});
+  return next;
 }
 
 chrome.runtime.onInstalled.addListener(() => {
