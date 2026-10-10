@@ -1357,3 +1357,110 @@ test('deleteOneArtifact informa si el elemento no tiene menu ⋮', async () => {
   assert.equal(result.ok, false);
   assert.match(result.reason, /menú ⋮/);
 });
+
+// --- Ejecutor del borrado en bloque (hito 3) ---------------------------------
+async function deleteSelectedViaPanel(window) {
+  bulkBtn(window, 'delete-selected').click();
+  await settle(window);
+  const yes = window.document.querySelector('#nl-confirm [data-nl-confirm="yes"]');
+  if (!yes) return false;
+  yes.click();
+  await window.__nlBulkRun;
+  await settle(window);
+  return true;
+}
+
+const statusText = (window) => window.document.getElementById('nl-bulk-status').textContent;
+
+test('cancelar en el modal no borra nada ni toca la UI nativa', async () => {
+  const window = await loadWithMetadata();
+  fastBulkTimeouts(window);
+  const ui = installNativeUiMock(window);
+  selectBoxes(window)[0].click();
+  bulkBtn(window, 'delete-selected').click();
+  await settle(window);
+
+  window.document.querySelector('#nl-confirm [data-nl-confirm="no"]').click();
+  await settle(window);
+
+  assert.equal(ui.log.length, 0);
+  assert.equal(window.document.querySelectorAll('artifact-library-item').length, 6);
+});
+
+test('confirmar borra los seleccionados uno a uno y deja chips, contador y seleccion al dia', async () => {
+  const window = await loadWithMetadata();
+  fastBulkTimeouts(window);
+  const ui = installNativeUiMock(window);
+  getItemByTitle(window, 'T66 - Audio - Test').querySelector('.nl-select').click();
+  getItemByTitle(window, 'T063 - Test - Test').querySelector('.nl-select').click();
+
+  assert.equal(await deleteSelectedViaPanel(window), true);
+  await window.runOnce(); // reconcilia chips y recuentos con lo que queda en el DOM
+
+  assert.deepEqual(Array.from(ui.log).sort(), ['T063 - Test - Test', 'T66 - Audio - Test']);
+  assert.equal(window.document.querySelectorAll('artifact-library-item').length, 4);
+  assert.equal(statusText(window), 'Borrados 2 de 2.');
+  assert.equal(bulkBtn(window, 'delete-selected').textContent, 'Borrar (0)');
+  assert.equal(findSourceChip(window, '066'), undefined, 'la fuente 066 se quedo sin elementos');
+  assert.equal(typeChipText(window, 'quiz'), 'Test (1)');
+});
+
+test('un fallo a mitad para la ejecucion e informa de cuantos se borraron y cual fallo', async () => {
+  const window = await loadWithMetadata();
+  fastBulkTimeouts(window);
+  const ui = installNativeUiMock(window, { noMenuFor: new Set(['T64 - Test - Test']) });
+  ['T063 - Test - Test', 'T64 - Test - Test', 'T65 - Audio - Test'].forEach((title) => {
+    getItemByTitle(window, title).querySelector('.nl-select').click();
+  });
+
+  await deleteSelectedViaPanel(window);
+
+  assert.equal(ui.log.length, 1, 'se borra el primero y se para en el que falla');
+  assert.match(statusText(window), /Borrados 1 de 3; falló en «T64 - Test - Test»/);
+  assert.equal(window.document.querySelectorAll('artifact-library-item').length, 5, 'el tercero no se toca');
+});
+
+test('Cancelar durante la ejecucion detiene el borrado tras el elemento en curso', async () => {
+  const window = await loadWithMetadata();
+  fastBulkTimeouts(window);
+  const ui = installNativeUiMock(window, {
+    onDelete: () => { window.document.querySelector('[data-nl-action="cancel-delete"]').click(); },
+  });
+  selectBoxes(window).slice(0, 3).forEach((box) => box.click());
+
+  await deleteSelectedViaPanel(window);
+
+  assert.equal(ui.log.length, 1);
+  assert.match(statusText(window), /Cancelado: borrados 1 de 3/);
+});
+
+test('si la extension se invalida a mitad, el borrado se aborta sin seguir pulsando', async () => {
+  const window = await loadWithMetadata();
+  fastBulkTimeouts(window);
+  const ui = installNativeUiMock(window, { onDelete: () => { window.teardownExtension(); } });
+  selectBoxes(window).slice(0, 3).forEach((box) => box.click());
+
+  await deleteSelectedViaPanel(window);
+
+  assert.equal(ui.log.length, 1, 'tras invalidarse el contexto no se borra nada mas');
+});
+
+test('mientras se borra, las casillas y los botones de seleccion quedan deshabilitados', async () => {
+  const window = await loadWithMetadata();
+  fastBulkTimeouts(window);
+  let during = null;
+  installNativeUiMock(window, {
+    onDelete: () => {
+      during = {
+        boxes: selectBoxes(window).every((box) => box.disabled),
+        selectAll: bulkBtn(window, 'select-visible').disabled,
+        label: window.document.querySelector('[data-nl-action="cancel-delete"]').textContent,
+      };
+    },
+  });
+  selectBoxes(window)[0].click();
+
+  await deleteSelectedViaPanel(window);
+
+  assert.deepEqual(during, { boxes: true, selectAll: true, label: 'Cancelar' });
+});

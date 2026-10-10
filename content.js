@@ -492,6 +492,7 @@ let lastBridgePayload = '';
 let studyModel = FILTER_CORE.buildStudyModel([], {});
 const selectedArtifactIds = new Set();
 let bulkDeleteRunning = false;
+let bulkDeleteCancelled = false;
 let bulkStatusText = '';
 // Tiempos del borrado en bloque (ms). Constantes con nombre; los tests los reducen.
 const BULK_DELETE = { menuMs: 2000, dialogMs: 2000, goneMs: 8000, stepMs: 50 };
@@ -1189,6 +1190,20 @@ function handleBulkAction(action) {
     visibleSelectableIds().forEach((id) => selectedArtifactIds.add(id));
   } else if (action === 'select-none') {
     selectedArtifactIds.clear();
+  } else if (action === 'cancel-delete') {
+    bulkDeleteCancelled = true;
+    setBulkStatus('Cancelando…');
+    return;
+  } else if (action === 'delete-selected') {
+    if (bulkDeleteRunning || !selectedArtifactIds.size) return;
+    const ids = Array.from(selectedArtifactIds);
+    const titlesById = new Map(ids.map((id) => {
+      const item = findItemByArtifactId(id);
+      return [id, item ? getTitle(item) : ''];
+    }));
+    window.__nlBulkRun = confirmBulkDelete(ids.map((id) => titlesById.get(id)))
+      .then((confirmed) => (confirmed ? runBulkDelete(ids, titlesById) : undefined));
+    return;
   } else {
     return;
   }
@@ -1337,6 +1352,52 @@ async function deleteOneArtifact(item) {
   );
   if (!gone) return { ok: false, reason: 'el elemento no desapareció de la lista tras confirmar' };
   return { ok: true };
+}
+
+function findItemByArtifactId(artifactId) {
+  return getArtifactItems(findStudioPanel() || document)
+    .find((item) => item.dataset.nlArtifactId === artifactId) || null;
+}
+
+// Borra en secuencia los ids dados. Se para al primer fallo, si el usuario
+// cancela o si la extension pierde el contexto; nunca sigue "a ciegas".
+async function runBulkDelete(ids, titlesById) {
+  bulkDeleteRunning = true;
+  bulkDeleteCancelled = false;
+  resyncSelection(); // deshabilita casillas y botones mientras dura el borrado
+  const total = ids.length;
+  let done = 0;
+  let outcome = '';
+  try {
+    for (const id of ids) {
+      if (!hasValidExtensionContext()) return;
+      if (bulkDeleteCancelled) {
+        outcome = 'Cancelado: borrados ' + done + ' de ' + total + '.';
+        break;
+      }
+      setBulkStatus('Borrando ' + (done + 1) + ' de ' + total + '…');
+      const result = await deleteOneArtifact(findItemByArtifactId(id));
+      if (!hasValidExtensionContext()) return;
+      if (!result.ok) {
+        outcome = 'Borrados ' + done + ' de ' + total + '; falló en «' + (titlesById.get(id) || id) + '»: ' + result.reason + '.';
+        break;
+      }
+      done += 1;
+      selectedArtifactIds.delete(id);
+    }
+    if (!outcome) {
+      outcome = bulkDeleteCancelled
+        ? 'Cancelado: borrados ' + done + ' de ' + total + '.'
+        : 'Borrados ' + done + ' de ' + total + '.';
+    }
+  } finally {
+    bulkDeleteRunning = false;
+    if (hasValidExtensionContext()) {
+      setBulkStatus(outcome);
+      resyncSelection();
+      scheduleScan();
+    }
+  }
 }
 
 function syncFilterUI(container, selectedStudyMap, selectedSourceMap) {
