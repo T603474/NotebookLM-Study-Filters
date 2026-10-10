@@ -985,3 +985,65 @@ test('un nombre de fuente con HTML se muestra como texto y no se inyecta', async
   assert.ok(chip.textContent.startsWith(evil));
   assert.equal(chip.getAttribute('title'), evil, 'el nombre completo tambien va en el tooltip');
 });
+
+// --- Pase de arreglos de la revision final (I-1, I-2, I-3) -------------------
+test('un nodo nuevo cuyo titulo solo difiere en espacios o mayusculas se enlaza por titulo, aunque cambie el orden', async () => {
+  const window = loadContentScript(buildDom());
+  await window.runOnce();
+  const items = Array.from(window.document.querySelectorAll('artifact-library-item'));
+  items[2].querySelector('.artifact-title').textContent = 'T66  -  audio - test';
+  // La red devuelve los artefactos en otro orden: la posicion ya no ayuda.
+  dispatchBridgeMetadata(window, { sources: REAL_SOURCES, artifacts: REAL_ARTIFACTS.slice().reverse() });
+  await settle(window);
+  await window.runOnce();
+
+  assert.equal(items[2].dataset.nlArtifactId, '2524cd6f-d462-4586-a90e-5cd81db6ba25',
+    'el titulo normalizado es unico en la cache: debe enlazarse sin depender de la posicion');
+});
+
+test('al recrearse el nodo del gemelo superviviente no se enlaza al artefacto borrado', async () => {
+  const ALPHA = '0a0a0a0a-0a0a-4a0a-8a0a-0a0a0a0a0a0a';
+  const BETA = '0b0b0b0b-0b0b-4b0b-8b0b-0b0b0b0b0b0b';
+  const A_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const B_ID = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+  const artifacts = [
+    { id: A_ID, title: 'Resumen de audio', typeCode: 1, sourceIds: [ALPHA] },
+    { id: B_ID, title: 'Resumen de audio', typeCode: 1, sourceIds: [BETA] },
+  ];
+  const window = await loadWithMetadata({ artifacts, sources: [[ALPHA, 'Alpha.md'], [BETA, 'Beta.md']] });
+  const [alphaNode, betaNode] = Array.from(window.document.querySelectorAll('artifact-library-item'));
+  assert.equal(betaNode.dataset.nlArtifactId, B_ID, 'sanity: cada gemelo enlazado a su artefacto');
+
+  // Se borra el de Alpha y Angular vuelve a crear el nodo del superviviente.
+  alphaNode.remove();
+  const fresh = betaNode.cloneNode(true);
+  fresh.removeAttribute('data-nl-artifact-id');
+  betaNode.replaceWith(fresh);
+  await window.runOnce();
+
+  assert.notEqual(fresh.dataset.nlArtifactId, A_ID, 'no debe enlazarse al artefacto de Alpha, que ya no existe');
+  assert.equal(findSourceChip(window, 'Alpha.md'), undefined, 'Alpha no tiene elementos: no debe haber chip');
+});
+
+test('una fuente seleccionada que ya no esta en el modelo se muestra marcada y se puede desmarcar', async () => {
+  const GONE = 'ID:99999999-9999-4999-8999-999999999999';
+  const store = { [SOURCE_KEY]: { [GONE]: true } };
+  const extra = { id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', title: 'Mapa Gamma renombrado', typeCode: 4, sourceIds: [] };
+  const window = loadContentScript(buildDom({ store, artifacts: [...REAL_ARTIFACTS, extra] }));
+  await window.runOnce();
+  // El elemento extra no llega en los metadatos: queda sin enlazar y el modelo incompleto.
+  dispatchBridgeMetadata(window, { sources: REAL_SOURCES, artifacts: REAL_ARTIFACTS });
+  await settle(window);
+  await window.runOnce();
+
+  const orphan = findSourceChip(window, 'Fuente no disponible');
+  assert.ok(orphan, 'la seleccion huerfana debe verse como un chip para poder desmarcarla');
+  assert.equal(orphan.getAttribute('aria-pressed'), 'true');
+
+  orphan.dispatchEvent(new window.Event('click', { bubbles: true, cancelable: true }));
+  await settle(window);
+
+  const hidden = Array.from(window.document.querySelectorAll('artifact-library-item'))
+    .filter((item) => item.hasAttribute('hidden'));
+  assert.equal(hidden.length, 0, 'tras desmarcarla no debe quedar nada oculto por la fuente fantasma');
+});

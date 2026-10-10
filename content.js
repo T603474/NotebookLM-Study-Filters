@@ -707,9 +707,11 @@ function linkDomArtifactsToMetadata() {
   items.forEach((item, index) => {
     let artifactId = getArtifactId(item);
     if (!artifactId) {
-      const title = getTitle(item);
-      const titleMatches = Array.from(artifactMetaCache.entries())
-        .filter(([id, meta]) => meta.title === title && !used.has(id));
+      const title = normalizeTitle(getTitle(item));
+      const titleMatches = title
+        ? Array.from(artifactMetaCache.entries())
+          .filter(([id, meta]) => normalizeTitle(meta.title) === title && !used.has(id))
+        : [];
       if (titleMatches.length === 1) artifactId = titleMatches[0][0];
     }
     if (artifactId) {
@@ -723,10 +725,22 @@ function linkDomArtifactsToMetadata() {
 
   // Fase 2, ultimo recurso: la posicion en la ultima respuesta de red, solo si
   // el titulo del candidato no contradice al del DOM y ningun otro item lo usa.
+  // Con titulos repetidos la posicion solo sirve si hay tantos items en el DOM
+  // como artefactos con ese titulo en la cache; si no (p. ej. se borro uno de
+  // los gemelos) no hay forma de saber cual queda y es mas seguro no enlazar.
+  const countByTitle = (titles) => {
+    const counts = new Map();
+    titles.forEach((title) => counts.set(title, (counts.get(title) || 0) + 1));
+    return counts;
+  };
+  const domTitleCounts = countByTitle(items.map((item) => normalizeTitle(getTitle(item))));
+  const cacheTitleCounts = countByTitle(Array.from(artifactMetaCache.values()).map((meta) => normalizeTitle(meta.title)));
   pending.forEach(([item, index]) => {
     const candidate = lastArtifactIdOrder[index];
     const meta = candidate ? artifactMetaCache.get(candidate) : null;
     if (!meta || used.has(candidate) || !titlesCompatible(meta, item)) return;
+    const title = normalizeTitle(getTitle(item));
+    if (title && domTitleCounts.get(title) !== cacheTitleCounts.get(title)) return;
     item.dataset.nlArtifactId = candidate;
     used.add(candidate);
   });
@@ -1227,6 +1241,15 @@ function updateFilterPanel(studyFilter, sourceFilter) {
 
   const studyTypes = getDisplayStudyTypes(model);
   const sourceChips = sourceChipsFromModel(model);
+  // Una fuente seleccionada que el modelo no conoce (p. ej. con el modelo
+  // incompleto no se poda) se muestra como chip marcado: si no, el filtro
+  // ocultaria elementos sin ningun chip que desmarcar.
+  const knownSrc = new Set(sourceChips.map((entry) => entry.src.toLowerCase()));
+  Object.keys(sourceFilter).forEach((src) => {
+    if (!sourceFilter[src] || !src.startsWith(FILTER_CORE.SOURCE_ID_PREFIX) || knownSrc.has(src.toLowerCase())) return;
+    const id = src.slice(FILTER_CORE.SOURCE_ID_PREFIX.length);
+    sourceChips.push({ src, id, display: 'Fuente no disponible · ' + id.slice(0, 4) });
+  });
   const normalizedStudyFilter = normalizeStudyFilter(studyFilter);
 
   const container = ensureFilterPanelExists();
