@@ -11,6 +11,8 @@ const {
   mergeMetadataSnapshot,
   isContextInvalidatedError,
   SOURCE_ID_PREFIX,
+  extractSourceKeys,
+  buildStudyModel,
 } = require('./filter-core');
 
 test('recognizes "Extension context invalidated" regardless of how the error arrives', () => {
@@ -230,4 +232,160 @@ test('metadata snapshots retain sources and artifacts from separate RPC response
 
   assert.deepEqual(complete.sources, [[sourceId, '047.md']]);
   assert.equal(complete.artifacts[0].id, artifactId);
+});
+
+// --- Modelo DOM-first (spec v1.2.0) -----------------------------------------
+// UUIDs y titulos reales del notebook "Infraestructura y Tecnologia (52-85)".
+const SRC_063 = '7b104fef-2fc0-431e-89c1-5bb86477541f';
+const SRC_064 = 'ea0a4122-c95a-4db3-a09d-d78439d5ccc2';
+const SRC_065 = 'a2cef8f2-e0f7-4ef0-b071-75f98d322058';
+const SRC_066 = '29e4fde1-ba03-4f8f-ad2f-3192805aeef7';
+const A_QUIZ_063 = 'b45be210-8a5b-4497-a0a7-db3e2e75bd8b';
+const A_QUIZ_064 = '2be6230f-34b2-4e2c-8491-800daeec4cbe';
+const A_AUDIO_066 = '2524cd6f-d462-4586-a90e-5cd81db6ba25';
+const A_AUDIO_065 = '9af21145-dbef-4bea-a6b9-a754160e3bf7';
+
+const MODEL_DICT = {
+  artifacts: new Map([
+    [A_QUIZ_063, { title: 'T063 - Test - Test', sourceIds: [SRC_063] }],
+    [A_QUIZ_064, { title: 'T64 - Test - Test', sourceIds: [SRC_064] }],
+    [A_AUDIO_066, { title: 'T66 - Audio - Test', sourceIds: [SRC_066] }],
+    [A_AUDIO_065, { title: 'T65 - Audio - Test', sourceIds: [SRC_065] }],
+  ]),
+  sourceTitles: new Map([
+    [SRC_063, '063.md'],
+    [SRC_064, '064.md'],
+    [SRC_065, '065.md'],
+    [SRC_066, '066.md'],
+  ]),
+};
+
+function domItem(id, kind) {
+  return { id, title: MODEL_DICT.artifacts.get(id).title, kind };
+}
+
+const ALL_ITEMS = [
+  domItem(A_QUIZ_063, 'quiz'),
+  domItem(A_QUIZ_064, 'quiz'),
+  domItem(A_AUDIO_066, 'audio'),
+  domItem(A_AUDIO_065, 'audio'),
+];
+
+test('extractSourceKeys deriva claves de nombres de fichero, de titulos y de un "Tema NN" explicito', () => {
+  assert.deepEqual(Array.from(extractSourceKeys('Tema41_Desarrollo_Madrid_ESTUDIO.md')), ['T041']);
+  assert.deepEqual(Array.from(extractSourceKeys('Claves y trampas del Tema 041 TIC')), ['T041']);
+  assert.deepEqual(Array.from(extractSourceKeys('Parte 12 del Tema 41')).sort(), ['T012', 'T041']);
+  assert.equal(extractSourceKeys('').size, 0);
+  assert.equal(extractSourceKeys('Informe anual 2026').size, 0);
+});
+
+test('buildStudyModel crea una fuente por UUID con su nombre real, recuentos y claves', () => {
+  const model = buildStudyModel(ALL_ITEMS, MODEL_DICT);
+  assert.deepEqual(model.sources.map((s) => s.label), ['063.md', '064.md', '065.md', '066.md']);
+  assert.deepEqual(model.sources.map((s) => s.id), [SRC_063, SRC_064, SRC_065, SRC_066]);
+  assert.deepEqual(model.sources.map((s) => s.keys), [['T063'], ['T064'], ['T065'], ['T066']]);
+  assert.equal(model.counts.total, 4);
+  assert.deepEqual(model.counts.byKind, { quiz: 2, audio: 2 });
+  assert.equal(model.counts.bySourceId[SRC_064], 1);
+  assert.equal(model.complete, true);
+});
+
+test('buildStudyModel mantiene separadas dos fuentes que comparten clave de tema', () => {
+  const ESTUDIO = '193e656a-e19e-405a-b80c-663376b1c8ad';
+  const EXAMEN = '9bbc1678-ec54-4e1a-99d7-9cb36a4d9266';
+  const dict = {
+    artifacts: new Map([
+      ['11111111-1111-4111-8111-111111111111', { title: 'Claves y trampas del Tema 041 TIC', sourceIds: [EXAMEN] }],
+      ['22222222-2222-4222-8222-222222222222', { title: 'Trampas de agilidad', sourceIds: [ESTUDIO] }],
+      ['33333333-3333-4333-8333-333333333333', { title: 'Resumen en audio del tema', sourceIds: [ESTUDIO] }],
+    ]),
+    sourceTitles: new Map([
+      [ESTUDIO, 'Tema41_Desarrollo_Madrid_ESTUDIO.md'],
+      [EXAMEN, 'Tema41_Desarrollo_Madrid_EXAMEN.md'],
+    ]),
+  };
+  const items = Array.from(dict.artifacts.entries())
+    .map(([id, meta]) => ({ id, title: meta.title, kind: 'audio' }));
+  const model = buildStudyModel(items, dict);
+  assert.deepEqual(model.sources.map((s) => s.label),
+    ['Tema41_Desarrollo_Madrid_ESTUDIO.md', 'Tema41_Desarrollo_Madrid_EXAMEN.md']);
+  assert.equal(model.counts.bySourceId[ESTUDIO], 2);
+  assert.equal(model.counts.bySourceId[EXAMEN], 1);
+  model.sources.forEach((s) => assert.deepEqual(s.keys, ['T041']));
+});
+
+test('buildStudyModel: quitar un elemento del DOM retira su fuente y descuenta los recuentos', () => {
+  const before = buildStudyModel(ALL_ITEMS, MODEL_DICT);
+  const after = buildStudyModel(ALL_ITEMS.filter((item) => item.id !== A_AUDIO_066), MODEL_DICT);
+  assert.equal(before.sources.some((s) => s.id === SRC_066), true);
+  assert.equal(after.sources.some((s) => s.id === SRC_066), false, 'la fuente 066 solo tenia ese artefacto');
+  assert.equal(after.counts.bySourceId[SRC_066], undefined);
+  assert.deepEqual(after.counts.byKind, { quiz: 2, audio: 1 });
+  assert.equal(after.counts.total, 3);
+});
+
+test('buildStudyModel cuenta los elementos sin enlace y marca el modelo como incompleto', () => {
+  const items = [
+    ...ALL_ITEMS,
+    { id: '', title: 'Sin enlace', kind: 'audio' },
+    { id: '99999999-9999-4999-8999-999999999999', title: 'No esta en la cache', kind: 'quiz' },
+  ];
+  const model = buildStudyModel(items, MODEL_DICT);
+  assert.equal(model.complete, false);
+  assert.equal(model.counts.total, 6);
+  assert.deepEqual(model.artifacts[4].sourceIds, []);
+  assert.equal(buildStudyModel([], MODEL_DICT).complete, false, 'sin elementos tampoco hay modelo completo');
+});
+
+test('buildStudyModel etiqueta: nombre, luego numero de tema, luego "Fuente sin nombre"; y desambigua repetidas', () => {
+  const NAMED = 'c0000000-0000-4000-8000-00000000000a';
+  const KEYED = SRC_064;
+  const BARE = SRC_066;
+  const TWIN_A = 'aaaa1111-0000-4000-8000-000000000001';
+  const TWIN_B = 'bbbb2222-0000-4000-8000-000000000002';
+  const dict = {
+    artifacts: new Map([
+      ['10000000-0000-4000-8000-000000000001', { title: 'Resumen', sourceIds: [NAMED] }],
+      ['10000000-0000-4000-8000-000000000002', { title: 'T064 - Audio', sourceIds: [KEYED] }],
+      ['10000000-0000-4000-8000-000000000003', { title: 'Resumen', sourceIds: [BARE] }],
+      ['10000000-0000-4000-8000-000000000004', { title: 'T041 - Audio', sourceIds: [TWIN_A] }],
+      ['10000000-0000-4000-8000-000000000005', { title: 'T041 - Test', sourceIds: [TWIN_B] }],
+    ]),
+    sourceTitles: new Map([[NAMED, 'informe_legislacion.md']]),
+  };
+  const items = Array.from(dict.artifacts.entries())
+    .map(([id, meta]) => ({ id, title: meta.title, kind: 'audio' }));
+  const labels = new Map(buildStudyModel(items, dict).sources.map((s) => [s.id, s.label]));
+  assert.equal(labels.get(NAMED), 'informe_legislacion.md');
+  assert.equal(labels.get(KEYED), '064');
+  assert.equal(labels.get(BARE), 'Fuente sin nombre · 29e4');
+  assert.equal(labels.get(TWIN_A), '041 · aaaa');
+  assert.equal(labels.get(TWIN_B), '041 · bbbb');
+});
+
+test('buildStudyModel deriva claves de tema solo de los artefactos presentes', () => {
+  const ids = ['20000000-0000-4000-8000-000000000001', '20000000-0000-4000-8000-000000000002'];
+  const dict = {
+    artifacts: new Map([
+      [ids[0], { title: 'T064 - Audio', sourceIds: [SRC_064] }],
+      [ids[1], { title: 'Resumen sin numero', sourceIds: [SRC_064] }],
+    ]),
+    sourceTitles: new Map(),
+  };
+  const both = [
+    { id: ids[0], title: 'T064 - Audio', kind: 'audio' },
+    { id: ids[1], title: 'Resumen sin numero', kind: 'audio' },
+  ];
+  assert.deepEqual(buildStudyModel(both, dict).sources[0].keys, ['T064']);
+  const afterDelete = buildStudyModel(both.slice(1), dict);
+  assert.deepEqual(afterDelete.sources[0].keys, [], 'sin el artefacto "T064" ya no hay clave que derivar');
+  assert.equal(afterDelete.sources[0].label, 'Fuente sin nombre · ea0a');
+});
+
+test('buildStudyModel expone por artefacto las claves y nombres de sus fuentes para el buscador de fuente', () => {
+  const model = buildStudyModel(ALL_ITEMS, MODEL_DICT);
+  const quiz064 = model.artifacts.find((a) => a.id === A_QUIZ_064);
+  assert.deepEqual(quiz064.sourceKeys, ['T064']);
+  assert.deepEqual(quiz064.sourceNames, ['064.md']);
+  assert.deepEqual(quiz064.sourceIds, [SRC_064]);
 });

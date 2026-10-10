@@ -231,7 +231,104 @@
     };
   }
 
+  // Claves de tema derivables de un texto (titulo de fuente o de artefacto):
+  // la primera clave numerica ("047.md", "T047", "Tema41_...") y, ademas, la de
+  // un "Tema NN" explicito. Misma logica que content.js usaba en
+  // extractSourceKeysFromText.
+  function extractSourceKeys(text) {
+    const keys = new Set();
+    if (!text) return keys;
+    const coreKey = sourceKeyFromTitle(text);
+    if (coreKey) keys.add(coreKey);
+    const tema = String(text).match(/\btema[\s_]*0*(\d{2,3})(?!\d)/i);
+    if (tema) {
+      const key = normalizeSourceQuery(tema[1]);
+      if (key) keys.add(key);
+    }
+    return keys;
+  }
+
+  function shortId(id) {
+    return String(id).slice(0, 4);
+  }
+
+  // Modelo de lo que existe AHORA en el panel de Studio (spec v1.2.0). El DOM
+  // decide que artefactos existen; el diccionario de red solo aporta sus
+  // fuentes y los titulos de fuente. Funcion pura: no toca DOM ni chrome.*.
+  //
+  //   domItems: [{ id, title, kind }]   (id '' si el item no esta enlazado)
+  //   dict:     { artifacts: Map<id, {sourceIds, title}>,
+  //               sourceTitles: Map<sourceId, title> }
+  function buildStudyModel(domItems, dict) {
+    const artifactDict = (dict && dict.artifacts) || new Map();
+    const sourceTitles = (dict && dict.sourceTitles) || new Map();
+    const byKind = {};
+    const bySourceId = {};
+    const titleKeysBySource = new Map();
+    const sourceOrder = [];
+    const artifacts = [];
+    let unlinked = 0;
+
+    for (const item of domItems || []) {
+      const meta = item.id ? artifactDict.get(item.id) : null;
+      if (!meta) unlinked += 1;
+      const sourceIds = meta ? Array.from(new Set(meta.sourceIds || [])) : [];
+      const titleKeys = extractSourceKeys((meta && meta.title) || item.title);
+      for (const sourceId of sourceIds) {
+        bySourceId[sourceId] = (bySourceId[sourceId] || 0) + 1;
+        if (!titleKeysBySource.has(sourceId)) {
+          titleKeysBySource.set(sourceId, new Set());
+          sourceOrder.push(sourceId);
+        }
+        titleKeys.forEach((key) => titleKeysBySource.get(sourceId).add(key));
+      }
+      const kind = item.kind || 'other';
+      byKind[kind] = (byKind[kind] || 0) + 1;
+      artifacts.push({ id: item.id || '', title: item.title || '', kind, sourceIds });
+    }
+
+    const sources = sourceOrder.map((id) => {
+      const name = sourceTitles.get(id) || '';
+      const keys = new Set(extractSourceKeys(name));
+      titleKeysBySource.get(id).forEach((key) => keys.add(key));
+      const sortedKeys = Array.from(keys).sort();
+      const label = name
+        || (sortedKeys[0] ? sortedKeys[0].replace(/^T/, '') : '')
+        || 'Fuente sin nombre · ' + shortId(id);
+      return { id, name, nameKnown: Boolean(name), keys: sortedKeys, label };
+    });
+
+    const labelUses = new Map();
+    sources.forEach((source) => labelUses.set(source.label, (labelUses.get(source.label) || 0) + 1));
+    sources.forEach((source) => {
+      if (labelUses.get(source.label) > 1) source.label += ' · ' + shortId(source.id);
+    });
+    sources.sort((a, b) => a.label.localeCompare(b.label, undefined, { numeric: true }));
+
+    const sourceById = new Map(sources.map((source) => [source.id, source]));
+    for (const artifact of artifacts) {
+      const keys = new Set();
+      const names = [];
+      for (const sourceId of artifact.sourceIds) {
+        const source = sourceById.get(sourceId);
+        source.keys.forEach((key) => keys.add(key));
+        if (source.name) names.push(source.name);
+      }
+      artifact.sourceKeys = Array.from(keys).sort();
+      artifact.sourceNames = names;
+    }
+
+    return {
+      artifacts,
+      sources,
+      counts: { byKind, bySourceId, total: artifacts.length },
+      complete: artifacts.length > 0 && unlinked === 0,
+    };
+  }
+
   return {
+    extractSourceKeys,
+    buildStudyModel,
     isUuid,
     isContextInvalidatedError,
     normalizeSourceQuery,
