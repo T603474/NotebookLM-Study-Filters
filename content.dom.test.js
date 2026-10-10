@@ -720,3 +720,41 @@ test('el panel se colapsa al clic en la cabecera y persiste el estado por notebo
   assert.equal(body().classList.contains('nl-collapsed'), false, 'tras otro clic debe volver a expandirse');
   assert.equal(arrow().textContent, '▼', 'la flecha debe volver a expandido');
 });
+
+// El fallback inline (INLINE_FILTER_CORE en content.js) duplica las funciones
+// puras de filter-core.js por el bug de la 0.1.6. Este test evita que
+// diverjan: mismas entradas, mismas salidas.
+function plain(value) {
+  return JSON.parse(JSON.stringify(value, (key, v) => (
+    Object.prototype.toString.call(v) === '[object Set]' ? Array.from(v).sort() : v
+  )));
+}
+
+test('el fallback inline reproduce exactamente el resultado de filter-core.js', () => {
+  const core = require('./filter-core');
+  const window = loadContentScript(buildDom());
+  const inline = vm.runInContext('INLINE_FILTER_CORE', window);
+
+  ['Tema41_Madrid_ESTUDIO.md', 'Parte 12 del Tema 41', '047.md', 'Informe anual 2026', ''].forEach((text) => {
+    assert.deepEqual(plain(inline.extractSourceKeys(text)), plain(core.extractSourceKeys(text)), text);
+  });
+
+  const artifacts = new Map(REAL_ARTIFACTS.map((a) => [a.id, { title: a.title, sourceIds: a.sourceIds }]));
+  const domItems = REAL_ARTIFACTS.map((a) => ({ id: a.id, title: a.title, kind: a.typeCode === 1 ? 'audio' : 'quiz' }));
+  const withNames = { artifacts, sourceTitles: new Map(REAL_SOURCES) };
+  const withoutNames = { artifacts, sourceTitles: new Map() };
+  [withNames, withoutNames].forEach((dict) => {
+    assert.deepEqual(plain(inline.buildStudyModel(domItems, dict)), plain(core.buildStudyModel(domItems, dict)));
+  });
+  assert.deepEqual(plain(inline.buildStudyModel([], withNames)), plain(core.buildStudyModel([], withNames)));
+
+  const model = core.buildStudyModel(domItems, withNames);
+  [
+    {},
+    { T064: true, T099: true },
+    { T064: false },
+    { 'ID:ea0a4122-c95a-4db3-a09d-d78439d5ccc2': true, 'ID:00000000-0000-4000-8000-000000000000': true },
+  ].forEach((saved) => {
+    assert.deepEqual(plain(inline.reconcileSourceFilter(model, saved)), plain(core.reconcileSourceFilter(model, saved)));
+  });
+});
