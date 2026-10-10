@@ -2,7 +2,7 @@
 
 Extensión de navegador (Manifest V3) para **Microsoft Edge** y **Google Chrome** que añade un panel de filtros dentro de la pestaña **Studio** de [Gemini Notebook](https://notebook.google.com) (antes NotebookLM; algunas cuentas siguen usando [notebooklm.google.com](https://notebooklm.google.com)), permitiendo filtrar las herramientas de estudio generadas (audios, presentaciones, tests, infografías, etc.) **por tipo de contenido** y **por fuente**, sin romper la SPA.
 
-> Versión actual: **1.2.3**
+> Versión actual: **1.3.0**
 
 ---
 
@@ -102,7 +102,7 @@ Si necesitas un host adicional (p. ej. un dominio de Google Workspace), añádel
 El panel "Filtros" tiene esta estructura:
 
 ```
-Filtros · v1.2.3                              Limpiar
+Filtros · v1.3.0                              Limpiar
 ─────────────────────────────────────────────
 TIPO DE CONTENIDO
   [ Buscar guías... ]
@@ -134,6 +134,13 @@ FUENTES
 ### Limpiar
 
 - El botón **Limpiar** (arriba a la derecha del panel) restablece todos los filtros a su estado por defecto (Todo visible, sin texto).
+
+### Seleccionar y borrar elementos de estudio
+
+- Cada elemento de la lista lleva una **casilla** (arriba a la izquierda). Solo la tienen los elementos enlazados a un artefacto.
+- **Seleccionar visibles** marca todo lo que deja pasar el filtro actual; **Ninguno** lo desmarca. Lo que un filtro oculte se deselecciona solo: nunca se borra algo que no ves.
+- **Borrar (n)** pide una confirmación con el recuento y los títulos y, si aceptas, repite por cada elemento la secuencia nativa (⋮ → Eliminar → confirmar). Se detiene al primer fallo e indica cuántos se borraron. **Cancelar** detiene el proceso tras el elemento en curso.
+- El borrado es **irreversible**: Gemini Notebook no permite deshacerlo.
 
 ### Popup de la extensión
 
@@ -239,7 +246,7 @@ La suite incluye:
 
 jsdom no reproduce todo lo que ocurre en Gemini Notebook real, así que cada versión se comprueba a mano tras recargar la extensión y **cerrar y reabrir** la pestaña:
 
-1. El panel muestra `Filtros · v1.2.3`.
+1. El panel muestra `Filtros · v1.3.0`.
 2. Los contadores de tipo y de fuente coinciden con la lista de herramientas.
 3. Borra una herramienta con su menú ⋮ → eliminar: el contador "Mostrando N de M" y los recuentos de tipo y de fuente bajan sin recargar.
 4. Borra la última herramienta de una fuente: su chip desaparece y el resto se mantiene.
@@ -247,6 +254,11 @@ jsdom no reproduce todo lo que ocurre en Gemini Notebook real, así que cada ver
 6. Un filtro de fuente guardado con la versión anterior sigue aplicado tras actualizar (el chip aparece marcado).
 7. Con una lista larga, haz scroll: los chips no desaparecen ni parpadean.
 8. En la consola de DevTools (contexto de la extensión) `__nlFilterDebug()` muestra `modelo: N elementos, M fuentes, completo = true`.
+9. **Borrado (primero con UN elemento de prueba).** Marca una sola casilla de un elemento que no te importe, pulsa **Borrar (1)**, comprueba el modal y confirma: el elemento desaparece y el estado dice `Borrados 1 de 1.`.
+10. Marca dos o tres elementos y bórralos: se borran uno a uno, los chips y los recuentos bajan, y la selección queda vacía.
+11. Con elementos seleccionados, activa un filtro que los oculte: el contador de **Borrar** baja a lo que ves.
+12. Durante un borrado de varios, pulsa **Cancelar**: se detiene tras el elemento en curso.
+13. Si algún paso nativo cambia (menú o diálogo distintos), el borrado debe **pararse** y decir qué no encontró, sin pulsar nada más.
 
 ---
 
@@ -276,6 +288,7 @@ jsdom no reproduce todo lo que ocurre en Gemini Notebook real, así que cada ver
 
 ## Historial de versiones
 
+- **1.3.0** — Selección y borrado de elementos de estudio: casilla por elemento, barra "Seleccionar visibles / Ninguno / Borrar (n)", confirmación propia y borrado secuencial con la UI nativa (⋮ → Eliminar → diálogo), con parada al primer fallo y botón Cancelar.
 - **1.2.3** — Los nombres de fuente solo se toman de la lista de `rLM1Ne` (otras respuestas de la web los pisaban) y las fuentes de un artefacto solo de su campo de fuentes (el informe interactivo incrustaba ids de otros elementos como falsas fuentes). `__nlFilterRpcLog` en la consola muestra qué llamadas ha parseado la extensión.
 - **1.2.2** — Los nombres de fuente llegan de la red (fila `[[uuid], título, …]`) y los artefactos de tipo archivo (10) e informe interactivo (11) se reconocen: chips con el nombre real y recuentos completos.
 - **1.2.1** — Panel DOM-first: chips, contadores y filtros se recalculan al borrar elementos; las fuentes se identifican por UUID (una por chip) y el filtro de fuentes guardado se migra y se poda; el panel se construye con nodos DOM (sin `innerHTML`).
