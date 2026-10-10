@@ -1,6 +1,6 @@
 {
   "name": "notebook-filter",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Extension de Chrome/Edge que filtra herramientas de estudio de Gemini Notebook (antes NotebookLM) por tipo y fuente.",
   "private": true,
   "main": "background.js",
