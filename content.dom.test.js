@@ -202,11 +202,18 @@ function installNativeUiMock(window, opts = {}) {
       event.stopPropagation();
       const title = titleOf(item);
       if (opts.noMenuFor && opts.noMenuFor.has(title)) return;
-      overlay.innerHTML = '<div role="menu" class="mat-mdc-menu-panel">'
+      if (opts.ariaControls) more.setAttribute('aria-controls', 'mock-menu');
+      // Menu ajeno con una opcion "Eliminar" (p. ej. el de una nota) abierto a la vez.
+      const rogue = opts.rogueMenu
+        ? '<div role="menu" id="rogue-menu"><button role="menuitem" class="rogue-delete"><span>Eliminar</span></button></div>'
+        : '';
+      overlay.innerHTML = rogue + '<div role="menu" id="mock-menu" class="mat-mdc-menu-panel">'
         + '<button role="menuitem"><mat-icon>share</mat-icon><span>Compartir</span></button>'
         + '<button role="menuitem"><mat-icon>edit</mat-icon><span>Cambiar nombre</span></button>'
         + '<button role="menuitem" class="mock-delete"><mat-icon>delete</mat-icon><span>Eliminar</span></button>'
         + '</div>';
+      const rogueButton = overlay.querySelector('.rogue-delete');
+      if (rogueButton) rogueButton.addEventListener('click', () => { if (opts.onRogue) opts.onRogue(); });
       overlay.querySelector('.mock-delete').addEventListener('click', () => {
         overlay.innerHTML = '<div role="dialog" class="mat-mdc-dialog-container"><h2>Eliminar Archivo?</h2>'
           + (opts.dialogWithoutCancel ? '' : '<button class="mock-cancel">Cancelar</button>')
@@ -216,7 +223,20 @@ function installNativeUiMock(window, opts = {}) {
         overlay.querySelector('.mock-confirm').addEventListener('click', () => {
           log.push(title);
           overlay.innerHTML = '';
-          if (opts.recycleNodes) {
+          if (opts.recycleByIndex) {
+            // Angular reutiliza los nodos por posicion: el nodo k pasa a mostrar
+            // el elemento k+1 y sobra el ultimo nodo. Los atributos no cambian.
+            const nodes = Array.from(doc.querySelectorAll('artifact-library-item'));
+            const from = nodes.indexOf(item);
+            for (let k = from; k < nodes.length - 1; k += 1) {
+              nodes[k].querySelector('.artifact-title').textContent = nodes[k + 1].querySelector('.artifact-title').textContent;
+            }
+            nodes[nodes.length - 1].remove();
+          } else if (opts.ghostDelete) {
+            // El servidor no borra nada, pero a la vez la lista cambia el titulo de este nodo.
+            item.after(item.cloneNode(true));
+            item.querySelector('.artifact-title').textContent = 'Nuevo elemento';
+          } else if (opts.recycleNodes) {
             // Angular reutiliza el nodo para mostrar otro elemento en vez de eliminarlo.
             item.querySelector('.artifact-title').textContent = 'Otro elemento reciclado';
           } else {
@@ -234,7 +254,7 @@ function installNativeUiMock(window, opts = {}) {
 }
 
 function fastBulkTimeouts(window) {
-  vm.runInContext('BULK_DELETE.menuMs = 250; BULK_DELETE.dialogMs = 250; BULK_DELETE.goneMs = 250;', window);
+  vm.runInContext('BULK_DELETE.menuMs = 250; BULK_DELETE.dialogMs = 250; BULK_DELETE.goneMs = 250; BULK_DELETE.settleMs = 250;', window);
 }
 
 async function loadWithMetadata(opts = {}) {
@@ -1463,4 +1483,128 @@ test('mientras se borra, las casillas y los botones de seleccion quedan deshabil
   await deleteSelectedViaPanel(window);
 
   assert.deepEqual(during, { boxes: true, selectAll: true, label: 'Cancelar' });
+});
+
+// --- Pase de arreglos de la revision final del hito 3 (C1, I1-I4) ------------
+const titlesInList = (window) => Array.from(window.document.querySelectorAll('artifact-library-item'))
+  .map((item) => item.querySelector('.artifact-title').textContent.trim());
+
+test('con Angular reciclando nodos por indice, cada borrado ataca el elemento seleccionado y no el que ocupa su nodo', async () => {
+  const window = await loadWithMetadata();
+  fastBulkTimeouts(window);
+  const ui = installNativeUiMock(window, { recycleByIndex: true });
+  getItemByTitle(window, 'T063 - Test - Test').querySelector('.nl-select').click();
+  getItemByTitle(window, 'T64 - Test - Test').querySelector('.nl-select').click();
+
+  await deleteSelectedViaPanel(window);
+
+  assert.deepEqual(Array.from(ui.log), ['T063 - Test - Test', 'T64 - Test - Test']);
+  const remaining = titlesInList(window);
+  assert.ok(remaining.includes('T66 - Audio - Test'), 'el elemento no seleccionado sigue vivo');
+  assert.ok(!remaining.includes('T063 - Test - Test') && !remaining.includes('T64 - Test - Test'));
+  assert.match(statusText(window), /Borrados 2 de 2/);
+});
+
+test('no se da por borrado un elemento que sigue en la lista aunque otro nodo cambie de titulo a la vez', async () => {
+  const window = await loadWithMetadata();
+  fastBulkTimeouts(window);
+  installNativeUiMock(window, { ghostDelete: true });
+  getItemByTitle(window, 'T66 - Audio - Test').querySelector('.nl-select').click();
+
+  await deleteSelectedViaPanel(window);
+
+  assert.match(statusText(window), /Borrados 0 de 1; falló en «T66 - Audio - Test»/);
+});
+
+test('con dos elementos del mismo titulo se niega a borrar (no puede saber cual es)', async () => {
+  const window = await loadWithMetadata();
+  fastBulkTimeouts(window);
+  const ui = installNativeUiMock(window);
+  Array.from(window.document.querySelectorAll('artifact-library-item'))
+    .filter((el) => el.querySelector('.artifact-title').textContent.trim() === 'T64 - Audio - Test')
+    .forEach((el) => el.querySelector('.nl-select').click());
+
+  await deleteSelectedViaPanel(window);
+
+  assert.equal(ui.log.length, 0, 'sin poder distinguir los gemelos no se pulsa nada');
+  assert.match(statusText(window), /mismo título/);
+});
+
+test('no se puede abrir un segundo modal y el boton Borrar queda deshabilitado mientras se confirma', async () => {
+  const window = await loadWithMetadata();
+  selectBoxes(window)[0].click();
+
+  bulkBtn(window, 'delete-selected').click();
+  assert.equal(bulkBtn(window, 'delete-selected').disabled, true, 'no se puede volver a pulsar con el modal abierto');
+  window.document.dispatchEvent(new window.Event('click', { bubbles: true }));
+  assert.equal(window.document.querySelectorAll('#nl-confirm').length, 1);
+  assert.ok(selectBoxes(window).every((box) => box.disabled), 'la seleccion no cambia bajo el modal');
+
+  const modal = window.document.getElementById('nl-confirm');
+  const cancel = modal.querySelector('[data-nl-confirm="no"]');
+  const ok = modal.querySelector('[data-nl-confirm="yes"]');
+  window.document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
+  assert.equal(window.document.activeElement, ok, 'Tab cicla dentro del modal');
+  window.document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Tab', bubbles: true }));
+  assert.equal(window.document.activeElement, cancel);
+
+  cancel.click();
+  await settle(window);
+  assert.equal(bulkBtn(window, 'delete-selected').disabled, false, 'al cancelar se puede volver a pulsar');
+});
+
+test('solo se pulsa el Eliminar del menu del elemento (aria-controls), no el de un menu ajeno abierto a la vez', async () => {
+  const window = await loadWithMetadata();
+  fastBulkTimeouts(window);
+  let rogue = 0;
+  const ui = installNativeUiMock(window, { ariaControls: true, rogueMenu: true, onRogue: () => { rogue += 1; } });
+  getItemByTitle(window, 'T66 - Audio - Test').querySelector('.nl-select').click();
+
+  await deleteSelectedViaPanel(window);
+
+  assert.equal(rogue, 0, 'no debe pulsarse el Eliminar de un menu que no es el del elemento');
+  assert.deepEqual(Array.from(ui.log), ['T66 - Audio - Test']);
+});
+
+test('mientras se borra hay una capa de bloqueo con Cancelar y el filtro del popup se ignora; al acabar se retira', async () => {
+  const messageListeners = [];
+  const window = await loadWithMetadata({ messageListeners });
+  fastBulkTimeouts(window);
+  let during = null;
+  installNativeUiMock(window, {
+    onDelete: () => {
+      let reply = null;
+      messageListeners.forEach((listener) => listener({ type: 'nl-apply', studyFilter: {}, sourceFilter: {} }, {}, (r) => { reply = r; }));
+      during = {
+        lock: Boolean(window.document.getElementById('nl-lock')),
+        bar: Boolean(window.document.querySelector('#nl-run-bar [data-nl-action="cancel-delete"]')),
+        busy: reply && reply.busy === true,
+      };
+    },
+  });
+  selectBoxes(window)[0].click();
+
+  await deleteSelectedViaPanel(window);
+
+  assert.deepEqual(during, { lock: true, bar: true, busy: true });
+  assert.equal(window.document.getElementById('nl-lock'), null, 'la capa se retira al terminar');
+  assert.equal(window.document.getElementById('nl-run-bar'), null);
+});
+
+test('si la lista no deja localizar con seguridad el elemento seleccionado, se para sin pulsar nada', async () => {
+  const window = await loadWithMetadata();
+  fastBulkTimeouts(window);
+  const ui = installNativeUiMock(window);
+  const item = getItemByTitle(window, 'T66 - Audio - Test');
+  item.querySelector('.nl-select').click();
+  bulkBtn(window, 'delete-selected').click();
+  await settle(window);
+  // Entre el modal y el borrado el nodo pasa a mostrar otro elemento.
+  item.querySelector('.artifact-title').textContent = 'Algo que no es lo confirmado';
+  window.document.querySelector('#nl-confirm [data-nl-confirm="yes"]').click();
+  await window.__nlBulkRun;
+  await settle(window);
+
+  assert.equal(ui.log.length, 0);
+  assert.match(statusText(window), /Borrados 0 de 1; falló en «T66 - Audio - Test»: no localizo/);
 });

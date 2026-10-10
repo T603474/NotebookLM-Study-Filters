@@ -430,6 +430,13 @@ function injectStyles() {
     .nl-modal-list { margin: 0 0 8px; padding-left: 18px; font-size: 12px; max-height: 40vh; overflow: auto; }
     .nl-modal-warning { font-size: 12px; color: #f28b82; margin: 0 0 12px; }
     .nl-modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
+    .nl-lock { position: fixed; inset: 0; z-index: 2147482000; background: transparent; cursor: progress; }
+    .nl-run-bar {
+      position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 2147482001;
+      display: flex; align-items: center; gap: 12px;
+      background: #202124; color: #e8eaed; border: 1px solid #3c4043; border-radius: 16px;
+      padding: 8px 14px; font: 12px 'Google Sans', Roboto, Arial, sans-serif;
+    }
     .nl-chip[aria-pressed="true"] {
       background: #8ab4f8;
       color: #202124;
@@ -493,9 +500,15 @@ let studyModel = FILTER_CORE.buildStudyModel([], {});
 const selectedArtifactIds = new Set();
 let bulkDeleteRunning = false;
 let bulkDeleteCancelled = false;
+let bulkConfirming = false;
 let bulkStatusText = '';
 // Tiempos del borrado en bloque (ms). Constantes con nombre; los tests los reducen.
-const BULK_DELETE = { menuMs: 2000, dialogMs: 2000, goneMs: 8000, stepMs: 50 };
+const BULK_DELETE = { menuMs: 2000, dialogMs: 2000, goneMs: 8000, settleMs: 2000, stepMs: 50 };
+
+// Con el modal abierto o durante el borrado, la seleccion no debe cambiar.
+function bulkBusy() {
+  return bulkDeleteRunning || bulkConfirming;
+}
 
 function isUuid(value) {
   return typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
@@ -801,6 +814,7 @@ function maybeResetMetadataCache() {
   sourceKeyToIds.clear();
   lastArtifactIdOrder = [];
   selectedArtifactIds.clear();
+  bulkStatusText = '';
 }
 
 function refreshArtifactMetadata() {
@@ -978,7 +992,9 @@ function syncSelection(items, model) {
     const box = wrap.firstChild;
     const checked = selectedArtifactIds.has(artifactId);
     if (box.checked !== checked) box.checked = checked;
-    if (box.disabled !== bulkDeleteRunning) box.disabled = bulkDeleteRunning;
+    if (box.disabled !== bulkBusy()) box.disabled = bulkBusy();
+    const label = 'Seleccionar «' + getTitle(item) + '» para borrar';
+    if (box.getAttribute('aria-label') !== label) box.setAttribute('aria-label', label);
   });
   for (const id of Array.from(selectedArtifactIds)) {
     if (!visible.has(id)) selectedArtifactIds.delete(id);
@@ -1144,8 +1160,10 @@ function buildFilterContent(container, view) {
 
 function setBulkStatus(text) {
   bulkStatusText = text;
-  const status = document.getElementById('nl-bulk-status');
-  if (status && status.textContent !== text) status.textContent = text;
+  ['nl-bulk-status', 'nl-run-text'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el && el.textContent !== text) el.textContent = text;
+  });
 }
 
 // Recalcula el modelo y repinta casillas y botones (p. ej. al empezar o
@@ -1167,11 +1185,11 @@ function syncBulkUI() {
     const label = bulkDeleteRunning ? 'Cancelar' : 'Borrar (' + count + ')';
     if (button.getAttribute('data-nl-action') !== action) button.setAttribute('data-nl-action', action);
     if (button.textContent !== label) button.textContent = label;
-    const disabled = !bulkDeleteRunning && count === 0;
+    const disabled = bulkConfirming || (!bulkDeleteRunning && count === 0);
     if (button.disabled !== disabled) button.disabled = disabled;
   }
   container.querySelectorAll('[data-nl-action="select-visible"], [data-nl-action="select-none"]').forEach((other) => {
-    if (other.disabled !== bulkDeleteRunning) other.disabled = bulkDeleteRunning;
+    if (other.disabled !== bulkBusy()) other.disabled = bulkBusy();
   });
 }
 
@@ -1195,14 +1213,27 @@ function handleBulkAction(action) {
     setBulkStatus('Cancelando…');
     return;
   } else if (action === 'delete-selected') {
-    if (bulkDeleteRunning || !selectedArtifactIds.size) return;
+    if (bulkBusy() || !selectedArtifactIds.size) return;
     const ids = Array.from(selectedArtifactIds);
     const titlesById = new Map(ids.map((id) => {
       const item = findItemByArtifactId(id);
       return [id, item ? getTitle(item) : ''];
     }));
+    bulkConfirming = true;
+    resyncSelection(); // deshabilita Borrar, los botones de seleccion y las casillas bajo el modal
+    // __nlBulkRun: promesa de la ultima ejecucion (diagnostico y tests).
     window.__nlBulkRun = confirmBulkDelete(ids.map((id) => titlesById.get(id)))
-      .then((confirmed) => (confirmed ? runBulkDelete(ids, titlesById) : undefined));
+      .then((confirmed) => {
+        bulkConfirming = false;
+        return confirmed ? runBulkDelete(ids, titlesById) : resyncSelection();
+      })
+      .catch((err) => {
+        bulkConfirming = false;
+        bulkDeleteRunning = false;
+        hideRunLock();
+        setBulkStatus('Error inesperado: ' + (err && err.message ? err.message : err) + '.');
+        resyncSelection();
+      });
     return;
   } else {
     return;
@@ -1231,8 +1262,12 @@ function confirmBulkDelete(titles) {
     ok.setAttribute('data-nl-confirm', 'yes');
     const buttons = makeElement('div', 'nl-modal-actions');
     buttons.append(cancel, ok);
+    const heading = makeElement('h2', 'nl-modal-title', '¿Borrar ' + total + (total === 1 ? ' elemento' : ' elementos') + ' de estudio?');
+    heading.id = 'nl-confirm-title';
+    backdrop.setAttribute('aria-labelledby', 'nl-confirm-title');
+    const opener = document.activeElement;
     card.append(
-      makeElement('h2', 'nl-modal-title', '¿Borrar ' + total + (total === 1 ? ' elemento' : ' elementos') + ' de estudio?'),
+      heading,
       list,
       makeElement('p', 'nl-modal-warning', 'Esta acción es irreversible: Gemini Notebook no permite deshacerla.'),
       buttons
@@ -1242,12 +1277,17 @@ function confirmBulkDelete(titles) {
     function close(result) {
       document.removeEventListener('keydown', onKey, true);
       backdrop.remove();
+      if (opener && opener.isConnected && typeof opener.focus === 'function') opener.focus();
       resolve(result);
     }
     function onKey(event) {
       if (event.key === 'Escape') {
         event.stopPropagation();
         close(false);
+      } else if (event.key === 'Tab') {
+        // El foco no sale del modal: cicla entre Cancelar y Borrar.
+        event.preventDefault();
+        (document.activeElement === cancel ? ok : cancel).focus();
       }
     }
     cancel.addEventListener('click', () => close(false));
@@ -1293,10 +1333,11 @@ function findItemMenuButton(item) {
   return icon ? icon.closest('button') : null;
 }
 
-function overlayControls() {
+// Controles de menu de las superposiciones; con `scope` solo los de ese panel.
+function overlayControls(scope) {
   const selector = '[role="menuitem"], [mat-menu-item], .mat-mdc-menu-item, button';
-  return Array.from(document.querySelectorAll(OVERLAY_SELECTOR))
-    .flatMap((root) => Array.from(root.querySelectorAll(selector)));
+  const roots = scope ? [scope] : Array.from(document.querySelectorAll(OVERLAY_SELECTOR));
+  return roots.flatMap((root) => Array.from(root.querySelectorAll(selector)));
 }
 
 function overlayDialogs() {
@@ -1306,8 +1347,13 @@ function overlayDialogs() {
 
 // "Eliminar" de un menu desplegable: dentro de la superposicion y fuera de
 // cualquier dialogo (el boton del dialogo tambien dice "Eliminar").
-function findMenuDeleteEntry() {
-  return overlayControls().find((el) => !el.closest(DIALOG_SELECTOR) && DELETE_LABEL.test(controlLabel(el))) || null;
+function findMenuDeleteEntry(scope) {
+  return overlayControls(scope).find((el) => !el.closest(DIALOG_SELECTOR) && DELETE_LABEL.test(controlLabel(el))) || null;
+}
+
+function countItemsTitled(normalizedTitle) {
+  return getArtifactItems(findStudioPanel() || document)
+    .filter((el) => normalizeTitle(getTitle(el)) === normalizedTitle).length;
 }
 
 // Boton de confirmar del dialogo de borrado. Solo se acepta un dialogo que
@@ -1331,14 +1377,21 @@ function dialogIsOpen() {
 async function deleteOneArtifact(item) {
   if (!item || !item.isConnected) return { ok: false, reason: 'el elemento ya no está en la lista' };
   const originalTitle = normalizeTitle(getTitle(item));
+  const countBefore = countItemsTitled(originalTitle);
   const trigger = findItemMenuButton(item);
   if (!trigger) return { ok: false, reason: 'no encuentro el menú ⋮ del elemento' };
-  if (findMenuDeleteEntry() || dialogIsOpen()) {
-    return { ok: false, reason: 'ya hay un menú abierto; ciérralo y reintenta' };
-  }
+  if (findMenuDeleteEntry()) return { ok: false, reason: 'ya hay un menú abierto; ciérralo y reintenta' };
+  if (dialogIsOpen()) return { ok: false, reason: 'ya hay un diálogo abierto; ciérralo y reintenta' };
 
   trigger.click();
-  const entry = await waitFor(findMenuDeleteEntry, BULK_DELETE.menuMs);
+  // Si el ⋮ declara que panel controla (aria-controls), "Eliminar" tiene que
+  // estar dentro de ESE panel: un menu ajeno abierto a la vez no cuenta.
+  const entry = await waitFor(() => {
+    const panelId = trigger.getAttribute('aria-controls');
+    if (!panelId) return findMenuDeleteEntry();
+    const panel = document.getElementById(panelId);
+    return panel ? findMenuDeleteEntry(panel) : null;
+  }, BULK_DELETE.menuMs);
   if (!entry) return { ok: false, reason: 'no se abrió el menú o no tiene la opción Eliminar' };
 
   entry.click();
@@ -1346,10 +1399,15 @@ async function deleteOneArtifact(item) {
   if (!confirm) return { ok: false, reason: 'no apareció el diálogo de confirmación esperado (con Cancelar y Eliminar)' };
 
   confirm.click();
-  const gone = await waitFor(
-    () => !item.isConnected || normalizeTitle(getTitle(item)) !== originalTitle,
-    BULK_DELETE.goneMs
-  );
+  // Exito solo si hay UN elemento menos con ese titulo y este nodo ya no lo
+  // muestra (desaparecio o se reciclo para otro). Que el nodo cambie de titulo
+  // por si solo no basta: podria ser otro elemento que llega a la vez.
+  const gone = await waitFor(() => {
+    if (countItemsTitled(originalTitle) >= countBefore) return null;
+    if (!item.isConnected) return true;
+    const shown = normalizeTitle(getTitle(item));
+    return shown && shown !== originalTitle ? true : null;
+  }, BULK_DELETE.goneMs);
   if (!gone) return { ok: false, reason: 'el elemento no desapareció de la lista tras confirmar' };
   return { ok: true };
 }
@@ -1359,15 +1417,58 @@ function findItemByArtifactId(artifactId) {
     .find((item) => item.dataset.nlArtifactId === artifactId) || null;
 }
 
+// Localiza el elemento a borrar re-enlazando la lista (Angular recicla nodos
+// y los atributos caducan) y exigiendo que muestre el titulo que se confirmo
+// en el modal. null = aun no es seguro (se reintenta); {error} = no se puede.
+function locateForDeletion(artifactId, expectedTitle) {
+  const wanted = normalizeTitle(expectedTitle);
+  if (!wanted) return { error: 'el elemento no tiene título legible' };
+  linkDomArtifactsToMetadata();
+  const items = getArtifactItems(findStudioPanel() || document);
+  const sameTitle = items.filter((el) => normalizeTitle(getTitle(el)) === wanted);
+  if (sameTitle.length > 1) {
+    return { error: 'hay varios elementos con el mismo título y no puedo distinguir cuál es' };
+  }
+  const item = findItemByArtifactId(artifactId);
+  return item && sameTitle[0] === item ? { item } : null;
+}
+
+// Capa transparente + barra con Cancelar mientras dura el borrado: el usuario
+// no puede abrir otros menus ni cambiar filtros bajo el ejecutor.
+function showRunLock() {
+  if (document.getElementById('nl-lock')) return;
+  const lock = makeElement('div', 'nl-lock');
+  lock.id = 'nl-lock';
+  const bar = makeElement('div', 'nl-run-bar');
+  bar.id = 'nl-run-bar';
+  const text = makeElement('span', '', bulkStatusText || 'Borrando…');
+  text.id = 'nl-run-text';
+  const cancel = makeElement('button', 'nl-btn nl-btn-danger', 'Cancelar');
+  cancel.type = 'button';
+  cancel.setAttribute('data-nl-action', 'cancel-delete');
+  bar.append(text, cancel);
+  document.body.append(lock, bar);
+}
+
+function hideRunLock() {
+  ['nl-lock', 'nl-run-bar'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.remove();
+  });
+}
+
 // Borra en secuencia los ids dados. Se para al primer fallo, si el usuario
 // cancela o si la extension pierde el contexto; nunca sigue "a ciegas".
 async function runBulkDelete(ids, titlesById) {
   bulkDeleteRunning = true;
   bulkDeleteCancelled = false;
   resyncSelection(); // deshabilita casillas y botones mientras dura el borrado
+  showRunLock();
+  const startPath = location.pathname;
   const total = ids.length;
   let done = 0;
   let outcome = '';
+  const failure = (id, reason) => 'Borrados ' + done + ' de ' + total + '; falló en «' + (titlesById.get(id) || id) + '»: ' + reason + '.';
   try {
     for (const id of ids) {
       if (!hasValidExtensionContext()) return;
@@ -1375,11 +1476,21 @@ async function runBulkDelete(ids, titlesById) {
         outcome = 'Cancelado: borrados ' + done + ' de ' + total + '.';
         break;
       }
+      if (location.pathname !== startPath) {
+        outcome = 'Interrumpido: se cambió de notebook. Borrados ' + done + ' de ' + total + '.';
+        break;
+      }
       setBulkStatus('Borrando ' + (done + 1) + ' de ' + total + '…');
-      const result = await deleteOneArtifact(findItemByArtifactId(id));
+      const located = await waitFor(() => locateForDeletion(id, titlesById.get(id)), BULK_DELETE.settleMs);
+      if (!hasValidExtensionContext()) return;
+      if (!located || located.error) {
+        outcome = failure(id, located ? located.error : 'no localizo con seguridad el elemento en la lista');
+        break;
+      }
+      const result = await deleteOneArtifact(located.item);
       if (!hasValidExtensionContext()) return;
       if (!result.ok) {
-        outcome = 'Borrados ' + done + ' de ' + total + '; falló en «' + (titlesById.get(id) || id) + '»: ' + result.reason + '.';
+        outcome = failure(id, result.reason);
         break;
       }
       done += 1;
@@ -1390,8 +1501,11 @@ async function runBulkDelete(ids, titlesById) {
         ? 'Cancelado: borrados ' + done + ' de ' + total + '.'
         : 'Borrados ' + done + ' de ' + total + '.';
     }
+  } catch (err) {
+    outcome = 'Error inesperado tras borrar ' + done + ' de ' + total + ': ' + (err && err.message ? err.message : err) + '.';
   } finally {
     bulkDeleteRunning = false;
+    hideRunLock();
     if (hasValidExtensionContext()) {
       setBulkStatus(outcome);
       resyncSelection();
@@ -1805,7 +1919,8 @@ function isInsideFilterPanel(node) {
 // realimentaria al observer y entraria en bucle infinito: applyFilters muta
 // el panel -> observer -> runOnce -> applyFilters -> muta el panel -> ...
 function isOwnNode(node) {
-  return node.nodeType === 1 && (node.classList.contains('nl-select-wrap') || node.id === 'nl-confirm');
+  return node.nodeType === 1
+    && (node.classList.contains('nl-select-wrap') || ['nl-confirm', 'nl-lock', 'nl-run-bar'].includes(node.id));
 }
 
 function observerCallback(records) {
@@ -2033,6 +2148,11 @@ if (!window.__nlApplyListenerInstalled) {
   window.__nlApplyListenerInstalled = true;
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (!message || message.type !== 'nl-apply') return;
+    // Durante un borrado no se cambian los filtros: lo confirmado debe seguir visible.
+    if (bulkBusy()) {
+      sendResponse({ ok: false, busy: true });
+      return;
+    }
     const studyFilter = normalizeStudyFilter(message.studyFilter || {});
     const sourceFilter = message.sourceFilter || {};
     const stored = { studyTypes: studyFilter, sourceTypes: sourceFilter };

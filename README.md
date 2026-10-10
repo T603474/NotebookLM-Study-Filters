@@ -2,7 +2,7 @@
 
 Extensión de navegador (Manifest V3) para **Microsoft Edge** y **Google Chrome** que añade un panel de filtros dentro de la pestaña **Studio** de [Gemini Notebook](https://notebook.google.com) (antes NotebookLM; algunas cuentas siguen usando [notebooklm.google.com](https://notebooklm.google.com)), permitiendo filtrar las herramientas de estudio generadas (audios, presentaciones, tests, infografías, etc.) **por tipo de contenido** y **por fuente**, sin romper la SPA.
 
-> Versión actual: **1.3.0**
+> Versión actual: **1.3.1**
 
 ---
 
@@ -102,7 +102,7 @@ Si necesitas un host adicional (p. ej. un dominio de Google Workspace), añádel
 El panel "Filtros" tiene esta estructura:
 
 ```
-Filtros · v1.3.0                              Limpiar
+Filtros · v1.3.1                              Limpiar
 ─────────────────────────────────────────────
 TIPO DE CONTENIDO
   [ Buscar guías... ]
@@ -246,7 +246,7 @@ La suite incluye:
 
 jsdom no reproduce todo lo que ocurre en Gemini Notebook real, así que cada versión se comprueba a mano tras recargar la extensión y **cerrar y reabrir** la pestaña:
 
-1. El panel muestra `Filtros · v1.3.0`.
+1. El panel muestra `Filtros · v1.3.1`.
 2. Los contadores de tipo y de fuente coinciden con la lista de herramientas.
 3. Borra una herramienta con su menú ⋮ → eliminar: el contador "Mostrando N de M" y los recuentos de tipo y de fuente bajan sin recargar.
 4. Borra la última herramienta de una fuente: su chip desaparece y el resto se mantiene.
@@ -288,6 +288,7 @@ jsdom no reproduce todo lo que ocurre en Gemini Notebook real, así que cada ver
 
 ## Historial de versiones
 
+- **1.3.1** — Borrado más seguro: cada elemento se vuelve a localizar y se comprueba contra el título confirmado (Angular recicla nodos), el éxito exige un elemento menos con ese título, no se borra si hay títulos repetidos, el menú pulsado debe ser el del ⋮ (aria-controls), el modal bloquea una segunda apertura y atrapa el foco, y una capa con Cancelar bloquea la página mientras se borra.
 - **1.3.0** — Selección y borrado de elementos de estudio: casilla por elemento, barra "Seleccionar visibles / Ninguno / Borrar (n)", confirmación propia y borrado secuencial con la UI nativa (⋮ → Eliminar → diálogo), con parada al primer fallo y botón Cancelar.
 - **1.2.3** — Los nombres de fuente solo se toman de la lista de `rLM1Ne` (otras respuestas de la web los pisaban) y las fuentes de un artefacto solo de su campo de fuentes (el informe interactivo incrustaba ids de otros elementos como falsas fuentes). `__nlFilterRpcLog` en la consola muestra qué llamadas ha parseado la extensión.
 - **1.2.2** — Los nombres de fuente llegan de la red (fila `[[uuid], título, …]`) y los artefactos de tipo archivo (10) e informe interactivo (11) se reconocen: chips con el nombre real y recuentos completos.
