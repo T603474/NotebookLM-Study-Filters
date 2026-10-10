@@ -326,7 +326,37 @@
     };
   }
 
+  // Reconcilia el filtro de fuentes guardado con el modelo actual (spec
+  // v1.2.0): traduce las claves antiguas "Tnnn" a los "ID:<uuid>" de las
+  // fuentes que las tienen y descarta las selecciones de fuentes que ya no
+  // existen (p. ej. tras borrar su ultimo artefacto), para que no quede un
+  // filtro fantasma que lo oculta todo. Solo actua cuando el modelo esta
+  // completo: mientras el DOM o la red aun cargan no se puede saber que
+  // fuentes existen y el filtro se conserva tal cual.
+  function reconcileSourceFilter(model, saved) {
+    const current = saved || {};
+    if (!model || !model.complete) return { filter: { ...current }, changed: false };
+    const knownIds = new Set(model.sources.map((source) => (SOURCE_ID_PREFIX + source.id).toLowerCase()));
+    const filter = {};
+    let changed = false;
+    for (const [src, pressed] of Object.entries(current)) {
+      if (src.startsWith(SOURCE_ID_PREFIX)) {
+        if (knownIds.has(src.toLowerCase())) filter[src] = Boolean(pressed);
+        else changed = true;
+        continue;
+      }
+      changed = true; // clave antigua: se traduce o se descarta
+      const normalized = normalizeSourceQuery(src);
+      if (!pressed || !normalized) continue;
+      model.sources
+        .filter((source) => source.keys.includes(normalized))
+        .forEach((source) => { filter[SOURCE_ID_PREFIX + source.id] = true; });
+    }
+    return { filter, changed };
+  }
+
   return {
+    reconcileSourceFilter,
     extractSourceKeys,
     buildStudyModel,
     isUuid,

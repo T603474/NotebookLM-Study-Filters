@@ -13,6 +13,7 @@ const {
   SOURCE_ID_PREFIX,
   extractSourceKeys,
   buildStudyModel,
+  reconcileSourceFilter,
 } = require('./filter-core');
 
 test('recognizes "Extension context invalidated" regardless of how the error arrives', () => {
@@ -388,4 +389,62 @@ test('buildStudyModel expone por artefacto las claves y nombres de sus fuentes p
   assert.deepEqual(quiz064.sourceKeys, ['T064']);
   assert.deepEqual(quiz064.sourceNames, ['064.md']);
   assert.deepEqual(quiz064.sourceIds, [SRC_064]);
+});
+
+const TEMA_ESTUDIO = '193e656a-e19e-405a-b80c-663376b1c8ad';
+const TEMA_EXAMEN = '9bbc1678-ec54-4e1a-99d7-9cb36a4d9266';
+
+function completeModel() {
+  const dict = {
+    artifacts: new Map([
+      ['11111111-1111-4111-8111-111111111111', { title: 'Claves Tema 041', sourceIds: [TEMA_EXAMEN] }],
+      ['22222222-2222-4222-8222-222222222222', { title: 'Audio ESTUDIO', sourceIds: [TEMA_ESTUDIO] }],
+      ['33333333-3333-4333-8333-333333333333', { title: 'T66 - Audio - Test', sourceIds: [SRC_066] }],
+    ]),
+    sourceTitles: new Map([
+      [TEMA_ESTUDIO, 'Tema41_Madrid_ESTUDIO.md'],
+      [TEMA_EXAMEN, 'Tema41_Madrid_EXAMEN.md'],
+    ]),
+  };
+  const items = Array.from(dict.artifacts.entries())
+    .map(([id, meta]) => ({ id, title: meta.title, kind: 'audio' }));
+  return buildStudyModel(items, dict);
+}
+
+test('reconcileSourceFilter no toca el filtro mientras el modelo esta incompleto', () => {
+  const incomplete = buildStudyModel([], MODEL_DICT);
+  const saved = { 'ID:aaaa0000-0000-4000-8000-000000000000': true, T041: true };
+  const result = reconcileSourceFilter(incomplete, saved);
+  assert.equal(result.changed, false);
+  assert.deepEqual(result.filter, saved);
+});
+
+test('reconcileSourceFilter conserva las fuentes que existen y descarta las que ya no', () => {
+  const gone = 'ID:aaaa0000-0000-4000-8000-000000000000';
+  const result = reconcileSourceFilter(completeModel(), { ['ID:' + SRC_066]: true, [gone]: true });
+  assert.equal(result.changed, true);
+  assert.deepEqual(result.filter, { ['ID:' + SRC_066]: true });
+});
+
+test('reconcileSourceFilter traduce una clave antigua "Tnnn" a todas las fuentes que la tienen', () => {
+  const result = reconcileSourceFilter(completeModel(), { T041: true });
+  assert.equal(result.changed, true);
+  assert.deepEqual(Object.keys(result.filter).sort(), ['ID:' + TEMA_ESTUDIO, 'ID:' + TEMA_EXAMEN].sort());
+  assert.ok(Object.values(result.filter).every((value) => value === true));
+});
+
+test('reconcileSourceFilter descarta claves antiguas desmarcadas o sin ninguna fuente', () => {
+  const result = reconcileSourceFilter(completeModel(), { T041: false, T050: true });
+  assert.equal(result.changed, true);
+  assert.deepEqual(result.filter, {});
+});
+
+test('reconcileSourceFilter es idempotente y no distingue mayusculas en los UUID', () => {
+  const model = completeModel();
+  const first = reconcileSourceFilter(model, { T066: true });
+  const second = reconcileSourceFilter(model, first.filter);
+  assert.equal(second.changed, false);
+  assert.deepEqual(second.filter, first.filter);
+  const upper = reconcileSourceFilter(model, { ['ID:' + SRC_066.toUpperCase()]: true });
+  assert.equal(upper.changed, false, 'el UUID en mayusculas sigue siendo la misma fuente');
 });
