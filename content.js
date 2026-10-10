@@ -680,9 +680,29 @@ function scanSourcesPanel() {
   });
 }
 
+function normalizeTitle(value) {
+  return String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+// Dos titulos son compatibles si alguno falta (no hay evidencia en contra) o
+// coinciden salvo espacios y mayusculas. Un titulo presente en ambos lados que
+// los contradice indica un nodo reciclado o un artefacto distinto.
+function titlesCompatible(meta, item) {
+  const metaTitle = normalizeTitle(meta.title);
+  const domTitle = normalizeTitle(getTitle(item));
+  return !metaTitle || !domTitle || metaTitle === domTitle;
+}
+
 function getArtifactId(item) {
   if (!item) return '';
-  if (item.dataset.nlArtifactId && isUuid(item.dataset.nlArtifactId)) return item.dataset.nlArtifactId;
+  const linked = item.dataset.nlArtifactId;
+  if (linked) {
+    const meta = isUuid(linked) ? artifactMetaCache.get(linked) : null;
+    if (meta && titlesCompatible(meta, item)) return linked;
+    // Enlace obsoleto: el artefacto ya no esta en la cache o Angular reciclo
+    // este nodo para otro artefacto. Se descarta y se vuelve a resolver.
+    delete item.dataset.nlArtifactId;
+  }
   for (const attr of ['artifact-id', 'artifactid', 'data-artifact-id']) {
     const value = item.getAttribute(attr);
     if (isUuid(value)) return value;
@@ -707,16 +727,36 @@ function getArtifactId(item) {
 
 function linkDomArtifactsToMetadata() {
   const items = getArtifactItems();
+  const used = new Set();
+  const pending = [];
+
+  // Fase 1: enlace fuerte (dataset validado / atributos) o coincidencia unica
+  // por titulo con un artefacto aun no reclamado por otro item.
   items.forEach((item, index) => {
     let artifactId = getArtifactId(item);
     if (!artifactId) {
       const title = getTitle(item);
       const titleMatches = Array.from(artifactMetaCache.entries())
-        .filter(([, meta]) => meta.title === title);
+        .filter(([id, meta]) => meta.title === title && !used.has(id));
       if (titleMatches.length === 1) artifactId = titleMatches[0][0];
     }
-    if (!artifactId && lastArtifactIdOrder[index]) artifactId = lastArtifactIdOrder[index];
-    if (artifactId) item.dataset.nlArtifactId = artifactId;
+    if (artifactId) {
+      item.dataset.nlArtifactId = artifactId;
+      used.add(artifactId);
+    } else {
+      delete item.dataset.nlArtifactId;
+      pending.push([item, index]);
+    }
+  });
+
+  // Fase 2, ultimo recurso: la posicion en la ultima respuesta de red, solo si
+  // el titulo del candidato no contradice al del DOM y ningun otro item lo usa.
+  pending.forEach(([item, index]) => {
+    const candidate = lastArtifactIdOrder[index];
+    const meta = candidate ? artifactMetaCache.get(candidate) : null;
+    if (!meta || used.has(candidate) || !titlesCompatible(meta, item)) return;
+    item.dataset.nlArtifactId = candidate;
+    used.add(candidate);
   });
 }
 

@@ -167,6 +167,18 @@ function getItemByTitle(window, title) {
   return items.find((item) => item.querySelector('.artifact-title').textContent.trim() === title);
 }
 
+async function loadWithMetadata(opts = {}) {
+  const window = loadContentScript(buildDom(opts));
+  await window.runOnce();
+  dispatchBridgeMetadata(window, {
+    sources: opts.sources || REAL_SOURCES,
+    artifacts: opts.artifacts || REAL_ARTIFACTS,
+  });
+  await settle(window);
+  await window.runOnce();
+  return window;
+}
+
 test('clicking the Audio chip hides quiz items when artifact metadata is captured correctly', async () => {
   const dom = buildDom({
     url: 'https://notebook.google.com/notebook/66d41b00-97bc-4f4c-a871-ba9f634f8b78',
@@ -757,4 +769,63 @@ test('el fallback inline reproduce exactamente el resultado de filter-core.js', 
   ].forEach((saved) => {
     assert.deepEqual(plain(inline.reconcileSourceFilter(model, saved)), plain(core.reconcileSourceFilter(model, saved)));
   });
+});
+
+// --- Enlace DOM <-> metadatos (spec v1.2.0, H4) ------------------------------
+test('un nodo reciclado por Angular se revalida y no hereda el artefacto anterior', async () => {
+  const window = await loadWithMetadata();
+  const t66 = getItemByTitle(window, 'T66 - Audio - Test');
+  const t65 = getItemByTitle(window, 'T65 - Audio - Test');
+  assert.equal(t65.dataset.nlArtifactId, '9af21145-dbef-4bea-a6b9-a754160e3bf7', 'sanity: T65 enlazado a su artefacto');
+
+  // Se borra T66 y Angular reutiliza el nodo de T65 para mostrar T66.
+  t66.remove();
+  t65.querySelector('.artifact-title').textContent = 'T66 - Audio - Test';
+  await window.runOnce();
+
+  assert.equal(t65.dataset.nlArtifactId, '2524cd6f-d462-4586-a90e-5cd81db6ba25',
+    'el nodo reciclado debe enlazarse al artefacto que muestra ahora (T66), no al que mostraba antes (T65)');
+});
+
+test('el fallback posicional se rechaza si el titulo del DOM contradice al de los metadatos', async () => {
+  const window = loadContentScript(buildDom());
+  await window.runOnce();
+  const items = Array.from(window.document.querySelectorAll('artifact-library-item'));
+  items[2].querySelector('.artifact-title').textContent = 'Un titulo completamente distinto';
+  dispatchBridgeMetadata(window, { sources: REAL_SOURCES, artifacts: REAL_ARTIFACTS });
+  await settle(window);
+  await window.runOnce();
+
+  assert.equal(items[2].dataset.nlArtifactId, undefined,
+    'un titulo que contradice al de la red no debe enlazarse solo por estar en la misma posicion');
+});
+
+// Guardas (pasan antes y despues del cambio): fijan el comportamiento que no
+// debe romperse al endurecer el enlace.
+test('un titulo del DOM que solo difiere en espacios o mayusculas sigue enlazado por posicion', async () => {
+  const window = loadContentScript(buildDom());
+  await window.runOnce();
+  const items = Array.from(window.document.querySelectorAll('artifact-library-item'));
+  items[2].querySelector('.artifact-title').textContent = 'T66  -  audio - test';
+  dispatchBridgeMetadata(window, { sources: REAL_SOURCES, artifacts: REAL_ARTIFACTS });
+  await settle(window);
+  await window.runOnce();
+
+  assert.equal(items[2].dataset.nlArtifactId, '2524cd6f-d462-4586-a90e-5cd81db6ba25');
+});
+
+test('al borrar uno de dos elementos con el mismo titulo, el otro sigue enlazado a su propio artefacto', async () => {
+  const window = await loadWithMetadata();
+  const twins = Array.from(window.document.querySelectorAll('artifact-library-item'))
+    .filter((item) => item.querySelector('.artifact-title').textContent.trim() === 'T64 - Audio - Test');
+  assert.equal(twins.length, 2);
+  const [first, second] = twins;
+  const secondId = second.dataset.nlArtifactId;
+  assert.ok(secondId, 'sanity: el segundo T64 - Audio - Test esta enlazado');
+  assert.notEqual(first.dataset.nlArtifactId, secondId, 'sanity: los dos gemelos tienen ids distintos');
+
+  first.remove();
+  await window.runOnce();
+
+  assert.equal(second.dataset.nlArtifactId, secondId);
 });
