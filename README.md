@@ -2,7 +2,7 @@
 
 Extensión de navegador (Manifest V3) para **Microsoft Edge** y **Google Chrome** que añade un panel de filtros dentro de la pestaña **Studio** de [Gemini Notebook](https://notebook.google.com) (antes NotebookLM; algunas cuentas siguen usando [notebooklm.google.com](https://notebooklm.google.com)), permitiendo filtrar las herramientas de estudio generadas (audios, presentaciones, tests, infografías, etc.) **por tipo de contenido** y **por fuente**, sin romper la SPA.
 
-> Versión actual: **1.1.0**
+> Versión actual: **1.2.0**
 
 ---
 
@@ -102,7 +102,7 @@ Si necesitas un host adicional (p. ej. un dominio de Google Workspace), añádel
 El panel "Filtros" tiene esta estructura:
 
 ```
-Filtros · v1.1.0                              Limpiar
+Filtros · v1.2.0                              Limpiar
 ─────────────────────────────────────────────
 TIPO DE CONTENIDO
   [ Buscar guías... ]
@@ -127,7 +127,7 @@ FUENTES
 
 ### Filtrar por fuente
 
-- **Chips de fuente**: solo aparecen fuentes para las que **ya existe** al menos una herramienta de estudio creada. Cada chip muestra el número de tema legible derivado del título de la fuente o del título del artefacto (p. ej. `041`).
+- **Chips de fuente**: un chip por fuente (identificada por su UUID) para la que **existe ahora** al menos una herramienta de estudio. Si borras su última herramienta, el chip desaparece y los recuentos se actualizan solos. El chip muestra el nombre real de la fuente; si no se conoce, el número de tema derivado (p. ej. `041`); y, si tampoco hay, `Fuente sin nombre · xxxx`. Un filtro de fuente guardado con una versión anterior se migra automáticamente.
 - **Buscador de fuente**: escribe el número de tema en cualquier formato habitual (`041`, `041.md`, `T041`, `Tema 41`, `Tema41_...`) y se filtrarán las herramientas de esa fuente. Acepta también parte del nombre del fichero fuente (p. ej. `legislacion` para `Informe_Legislacion_Obsoleta.md`).
 - Selecciona uno o varios chips de fuente para combinar (semántica **O** entre fuentes seleccionadas, **Y** con el tipo y el texto).
 
@@ -235,6 +235,19 @@ La suite incluye:
 - `site-access.test.js`: pruebas unitarias de los helpers de hosts y permisos (`site-access.js`).
 - `popup.test.js`: pruebas del popup, incluido el flujo de acceso a sitios y el primer prompt de presets.
 
+### Verificación manual en el navegador
+
+jsdom no reproduce todo lo que ocurre en Gemini Notebook real, así que cada versión se comprueba a mano tras recargar la extensión y **cerrar y reabrir** la pestaña:
+
+1. El panel muestra `Filtros · v1.2.0`.
+2. Los contadores de tipo y de fuente coinciden con la lista de herramientas.
+3. Borra una herramienta con su menú ⋮ → eliminar: el contador "Mostrando N de M" y los recuentos de tipo y de fuente bajan sin recargar.
+4. Borra la última herramienta de una fuente: su chip desaparece y el resto se mantiene.
+5. Selecciona el chip de una fuente y borra su última herramienta: la lista no queda vacía ni oculta.
+6. Un filtro de fuente guardado con la versión anterior sigue aplicado tras actualizar (el chip aparece marcado).
+7. Con una lista larga, haz scroll: los chips no desaparecen ni parpadean.
+8. En la consola de DevTools (contexto de la extensión) `__nlFilterDebug()` muestra `modelo: N elementos, M fuentes, completo = true`.
+
 ---
 
 ## Estructura del proyecto
@@ -263,6 +276,7 @@ La suite incluye:
 
 ## Historial de versiones
 
+- **1.2.0** — Panel DOM-first: chips, contadores y filtros se recalculan al borrar elementos; las fuentes se identifican por UUID (una por chip) y el filtro de fuentes guardado se migra y se poda; el panel se construye con nodos DOM (sin `innerHTML`).
 - **1.1.0** — Renombrado a Gemini Notebook; permisos de host opcionales (`optional_host_permissions`), popup de acceso a sitios y soporte de hosts personalizados.
 - **0.1.1** — Interceptación de `batchexecute` para tipo/fuente real y panel de filtros in-page.
 - **0.1.2** — Fuentes de respaldo por UUID y clasificación de filas fuente/artefacto más robusta.
