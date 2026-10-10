@@ -1244,6 +1244,101 @@ function confirmBulkDelete(titles) {
   });
 }
 
+const DELETE_LABEL = /^(eliminar|borrar|delete|remove)$/;
+const CANCEL_LABEL = /^(cancelar|cancel)$/;
+const OVERLAY_SELECTOR = '.cdk-overlay-container';
+const DIALOG_SELECTOR = '[role="dialog"], [role="alertdialog"], mat-dialog-container';
+
+// Texto de un control sin sus iconos (un mat-icon aporta texto como "delete").
+function controlLabel(el) {
+  const clone = el.cloneNode(true);
+  clone.querySelectorAll('mat-icon, .mat-icon, svg').forEach((node) => node.remove());
+  return clone.textContent.replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+function waitFor(fn, timeoutMs) {
+  return new Promise((resolve) => {
+    const started = Date.now();
+    (function poll() {
+      const value = fn();
+      if (value) {
+        resolve(value);
+      } else if (Date.now() - started >= timeoutMs) {
+        resolve(null);
+      } else {
+        setTimeout(poll, BULK_DELETE.stepMs);
+      }
+    })();
+  });
+}
+
+function findItemMenuButton(item) {
+  const icon = Array.from(item.querySelectorAll('mat-icon'))
+    .find((el) => el.textContent.trim() === 'more_vert');
+  return icon ? icon.closest('button') : null;
+}
+
+function overlayControls() {
+  const selector = '[role="menuitem"], [mat-menu-item], .mat-mdc-menu-item, button';
+  return Array.from(document.querySelectorAll(OVERLAY_SELECTOR))
+    .flatMap((root) => Array.from(root.querySelectorAll(selector)));
+}
+
+function overlayDialogs() {
+  return Array.from(document.querySelectorAll(OVERLAY_SELECTOR))
+    .flatMap((root) => Array.from(root.querySelectorAll(DIALOG_SELECTOR)));
+}
+
+// "Eliminar" de un menu desplegable: dentro de la superposicion y fuera de
+// cualquier dialogo (el boton del dialogo tambien dice "Eliminar").
+function findMenuDeleteEntry() {
+  return overlayControls().find((el) => !el.closest(DIALOG_SELECTOR) && DELETE_LABEL.test(controlLabel(el))) || null;
+}
+
+// Boton de confirmar del dialogo de borrado. Solo se acepta un dialogo que
+// tenga a la vez "Cancelar" y "Eliminar": su titulo cambia segun el tipo.
+function findDialogConfirm() {
+  for (const dialog of overlayDialogs()) {
+    const buttons = Array.from(dialog.querySelectorAll('button'));
+    const cancel = buttons.find((b) => CANCEL_LABEL.test(controlLabel(b)));
+    const confirm = buttons.find((b) => DELETE_LABEL.test(controlLabel(b)));
+    if (cancel && confirm) return confirm;
+  }
+  return null;
+}
+
+function dialogIsOpen() {
+  return overlayDialogs().length > 0;
+}
+
+// Borra UN elemento con la UI nativa: ⋮ -> Eliminar -> dialogo -> Eliminar.
+// Nunca pulsa a ciegas: si falta o sobra algo, devuelve el motivo y no sigue.
+async function deleteOneArtifact(item) {
+  if (!item || !item.isConnected) return { ok: false, reason: 'el elemento ya no está en la lista' };
+  const originalTitle = normalizeTitle(getTitle(item));
+  const trigger = findItemMenuButton(item);
+  if (!trigger) return { ok: false, reason: 'no encuentro el menú ⋮ del elemento' };
+  if (findMenuDeleteEntry() || dialogIsOpen()) {
+    return { ok: false, reason: 'ya hay un menú abierto; ciérralo y reintenta' };
+  }
+
+  trigger.click();
+  const entry = await waitFor(findMenuDeleteEntry, BULK_DELETE.menuMs);
+  if (!entry) return { ok: false, reason: 'no se abrió el menú o no tiene la opción Eliminar' };
+
+  entry.click();
+  const confirm = await waitFor(findDialogConfirm, BULK_DELETE.dialogMs);
+  if (!confirm) return { ok: false, reason: 'no apareció el diálogo de confirmación esperado (con Cancelar y Eliminar)' };
+
+  confirm.click();
+  const gone = await waitFor(
+    () => !item.isConnected || normalizeTitle(getTitle(item)) !== originalTitle,
+    BULK_DELETE.goneMs
+  );
+  if (!gone) return { ok: false, reason: 'el elemento no desapareció de la lista tras confirmar' };
+  return { ok: true };
+}
+
 function syncFilterUI(container, selectedStudyMap, selectedSourceMap) {
   const studyRow = container.querySelector('[data-nl-row]');
   if (studyRow) {

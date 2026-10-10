@@ -1286,3 +1286,74 @@ test('el modal solo devuelve true con el boton de confirmar; Esc devuelve false'
   window.document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
   assert.equal(await esc, false);
 });
+
+// --- UI nativa: menu y dialogo (hito 3) --------------------------------------
+async function loadWithNativeUi(uiOpts) {
+  const window = await loadWithMetadata();
+  fastBulkTimeouts(window);
+  const ui = installNativeUiMock(window, uiOpts);
+  return { window, ui, deleteOne: vm.runInContext('deleteOneArtifact', window) };
+}
+
+test('deleteOneArtifact recorre menu, dialogo y confirma: el elemento desaparece', async () => {
+  const { window, ui, deleteOne } = await loadWithNativeUi();
+  const item = getItemByTitle(window, 'T66 - Audio - Test');
+
+  const result = await deleteOne(item);
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(Array.from(ui.log), ['T66 - Audio - Test']);
+  assert.equal(item.isConnected, false);
+});
+
+test('deleteOneArtifact se niega si ya hay un menu abierto de otro elemento (no pulsa el Eliminar ajeno)', async () => {
+  const { window, ui, deleteOne } = await loadWithNativeUi();
+  // Menu de otro elemento que quedo abierto de un intento anterior.
+  ui.overlay.innerHTML = '<div role="menu"><button role="menuitem"><span>Eliminar</span></button></div>';
+  let stray = 0;
+  ui.overlay.querySelector('button').addEventListener('click', () => { stray += 1; });
+
+  const result = await deleteOne(getItemByTitle(window, 'T66 - Audio - Test'));
+
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /menú abierto/);
+  assert.equal(stray, 0, 'no debe pulsarse el Eliminar de un menu ajeno');
+  assert.equal(ui.log.length, 0);
+});
+
+test('deleteOneArtifact no confirma un dialogo inesperado (sin boton Cancelar)', async () => {
+  const { window, ui, deleteOne } = await loadWithNativeUi({ dialogWithoutCancel: true });
+
+  const result = await deleteOne(getItemByTitle(window, 'T66 - Audio - Test'));
+
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /diálogo/);
+  assert.equal(ui.log.length, 0, 'sin Cancelar no se pulsa Eliminar');
+});
+
+test('deleteOneArtifact informa si el menu no se abre', async () => {
+  const { window, deleteOne } = await loadWithNativeUi({ noMenuFor: new Set(['T66 - Audio - Test']) });
+
+  const result = await deleteOne(getItemByTitle(window, 'T66 - Audio - Test'));
+
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /menú/);
+});
+
+test('deleteOneArtifact da por borrado un nodo que Angular recicla para mostrar otro elemento', async () => {
+  const { window, ui, deleteOne } = await loadWithNativeUi({ recycleNodes: true });
+  const item = getItemByTitle(window, 'T66 - Audio - Test');
+
+  const result = await deleteOne(item);
+
+  assert.equal(result.ok, true, 'el nodo sigue en el DOM pero ya muestra otro titulo');
+  assert.equal(ui.log.length, 1);
+});
+
+test('deleteOneArtifact informa si el elemento no tiene menu ⋮', async () => {
+  const window = await loadWithMetadata();
+  fastBulkTimeouts(window);
+  const result = await vm.runInContext('deleteOneArtifact', window)(getItemByTitle(window, 'T66 - Audio - Test'));
+  assert.equal(result.ok, false);
+  assert.match(result.reason, /menú ⋮/);
+});
