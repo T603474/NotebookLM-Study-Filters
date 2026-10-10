@@ -1253,3 +1253,36 @@ test('"Limpiar" sigue limpiando los filtros y no toca la seleccion', async () =>
   await settle(window);
   assert.equal(window.document.querySelector('[data-nl-type="__all__"]').getAttribute('aria-pressed'), 'true');
 });
+
+// --- Modal de confirmacion (hito 3) ------------------------------------------
+test('el modal de confirmacion lista recuento y titulos, con Cancelar enfocado, y cancela por defecto', async () => {
+  const window = await loadWithMetadata();
+  const titles = Array.from({ length: 12 }, (_, i) => 'Elemento ' + (i + 1));
+  const pending = vm.runInContext('confirmBulkDelete', window)(titles);
+
+  const modal = window.document.getElementById('nl-confirm');
+  assert.ok(modal, 'debe mostrarse el modal');
+  assert.equal(modal.getAttribute('role'), 'dialog');
+  assert.ok(modal.textContent.includes('12 elementos'), 'recuento');
+  assert.ok(modal.textContent.includes('Elemento 10') && !modal.textContent.includes('Elemento 11'), 'maximo 10 titulos');
+  assert.ok(modal.textContent.includes('y 2 más'));
+  assert.ok(modal.textContent.includes('irreversible'));
+  assert.equal(window.document.activeElement, modal.querySelector('[data-nl-confirm="no"]'), 'foco inicial en Cancelar');
+
+  modal.querySelector('[data-nl-confirm="no"]').click();
+  assert.equal(await pending, false);
+  assert.equal(window.document.getElementById('nl-confirm'), null, 'el modal se retira al cerrar');
+});
+
+test('el modal solo devuelve true con el boton de confirmar; Esc devuelve false', async () => {
+  const window = await loadWithMetadata();
+  const confirm = vm.runInContext('confirmBulkDelete', window);
+
+  const yes = confirm(['A']);
+  window.document.querySelector('#nl-confirm [data-nl-confirm="yes"]').click();
+  assert.equal(await yes, true);
+
+  const esc = confirm(['A']);
+  window.document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  assert.equal(await esc, false);
+});

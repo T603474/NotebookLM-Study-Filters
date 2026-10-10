@@ -416,6 +416,20 @@ function injectStyles() {
     .nl-btn:disabled { opacity: 0.4; cursor: default; }
     .nl-btn-danger { border-color: #f28b82; color: #f28b82; }
     .nl-bulk-status { font-size: 11px; color: #9aa0a6; padding: 2px; min-height: 14px; }
+    .nl-modal-backdrop {
+      position: fixed; inset: 0; z-index: 2147483000;
+      background: rgba(0, 0, 0, 0.6);
+      display: flex; align-items: center; justify-content: center;
+      font-family: 'Google Sans', Roboto, Arial, sans-serif;
+    }
+    .nl-modal {
+      background: #202124; color: #e8eaed; border: 1px solid #3c4043;
+      border-radius: 12px; padding: 16px 20px; max-width: 420px; width: calc(100% - 32px);
+    }
+    .nl-modal-title { font-size: 15px; margin: 0 0 8px; font-weight: 500; }
+    .nl-modal-list { margin: 0 0 8px; padding-left: 18px; font-size: 12px; max-height: 40vh; overflow: auto; }
+    .nl-modal-warning { font-size: 12px; color: #f28b82; margin: 0 0 12px; }
+    .nl-modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
     .nl-chip[aria-pressed="true"] {
       background: #8ab4f8;
       color: #202124;
@@ -1179,6 +1193,55 @@ function handleBulkAction(action) {
     return;
   }
   resyncSelection();
+}
+
+// Confirmacion propia antes de un borrado irreversible. Foco inicial en
+// Cancelar; Esc, clic fuera o Cancelar devuelven false.
+function confirmBulkDelete(titles) {
+  return new Promise((resolve) => {
+    const total = titles.length;
+    const backdrop = makeElement('div', 'nl-modal-backdrop');
+    backdrop.id = 'nl-confirm';
+    backdrop.setAttribute('role', 'dialog');
+    backdrop.setAttribute('aria-modal', 'true');
+    const card = makeElement('div', 'nl-modal');
+    const list = makeElement('ul', 'nl-modal-list');
+    titles.slice(0, 10).forEach((title) => list.appendChild(makeElement('li', '', title || '(sin título)')));
+    if (total > 10) list.appendChild(makeElement('li', '', 'y ' + (total - 10) + ' más'));
+    const cancel = makeElement('button', 'nl-btn', 'Cancelar');
+    cancel.type = 'button';
+    cancel.setAttribute('data-nl-confirm', 'no');
+    const ok = makeElement('button', 'nl-btn nl-btn-danger', 'Borrar ' + total);
+    ok.type = 'button';
+    ok.setAttribute('data-nl-confirm', 'yes');
+    const buttons = makeElement('div', 'nl-modal-actions');
+    buttons.append(cancel, ok);
+    card.append(
+      makeElement('h2', 'nl-modal-title', '¿Borrar ' + total + (total === 1 ? ' elemento' : ' elementos') + ' de estudio?'),
+      list,
+      makeElement('p', 'nl-modal-warning', 'Esta acción es irreversible: Gemini Notebook no permite deshacerla.'),
+      buttons
+    );
+    backdrop.appendChild(card);
+
+    function close(result) {
+      document.removeEventListener('keydown', onKey, true);
+      backdrop.remove();
+      resolve(result);
+    }
+    function onKey(event) {
+      if (event.key === 'Escape') {
+        event.stopPropagation();
+        close(false);
+      }
+    }
+    cancel.addEventListener('click', () => close(false));
+    ok.addEventListener('click', () => close(true));
+    backdrop.addEventListener('click', (event) => { if (event.target === backdrop) close(false); });
+    document.addEventListener('keydown', onKey, true);
+    document.body.appendChild(backdrop);
+    cancel.focus();
+  });
 }
 
 function syncFilterUI(container, selectedStudyMap, selectedSourceMap) {
