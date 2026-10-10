@@ -970,3 +970,18 @@ test('no se poda la seleccion guardada mientras los metadatos no han llegado', a
   assert.deepEqual(store[SOURCE_KEY], { ['ID:' + SRC_066_ID]: true });
   assert.equal(findSourceChip(window, '066').getAttribute('aria-pressed'), 'true');
 });
+
+// --- Renderizado seguro (spec v1.2.0, H8) ------------------------------------
+test('un nombre de fuente con HTML se muestra como texto y no se inyecta', async () => {
+  const evil = '<img src=x onerror="window.__pwned = true">.md';
+  const sources = [[REAL_SOURCES[0][0], evil], ...REAL_SOURCES.slice(1)];
+  const window = await loadWithMetadata({ sources });
+
+  const panel = window.document.getElementById('nl-filter-panel');
+  assert.equal(panel.querySelector('img'), null, 'no debe crearse ningun <img> dentro del panel');
+  const chip = Array.from(panel.querySelectorAll('[data-nl-source]'))
+    .find((el) => el.textContent.includes('onerror'));
+  assert.ok(chip, 'el nombre debe aparecer como texto literal en el chip');
+  assert.ok(chip.textContent.startsWith(evil));
+  assert.equal(chip.getAttribute('title'), evil, 'el nombre completo tambien va en el tooltip');
+});

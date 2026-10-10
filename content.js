@@ -380,6 +380,10 @@ function injectStyles() {
       border-color: #aecbfa;
     }
     .nl-chip {
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
       appearance: none;
       border: 1px solid #8ab4f8;
       background: transparent;
@@ -920,41 +924,81 @@ function syncChipLabels(container, sourceChips, typeCounts, sourceCounts) {
   });
 }
 
-function buildFilterHTML(studyTypes, selectedStudyMap, sourceTypes, selectedSourceMap, typeCounts, sourceCounts) {
-  const tc = typeCounts || {};
-  const sc = sourceCounts || {};
-  const studyChips = studyTypes.map((type) => {
-    const pressed = selectedStudyMap[type] ? 'true' : 'false';
-    const label = type === ALL_TYPES_KEY ? typeLabel(type) : (typeLabel(type) + ' (' + (tc[type] || 0) + ')');
-    return '<button class="nl-chip" type="button" aria-pressed="' + pressed + '" data-nl-type="' + type + '">' + label + '</button>';
-  }).join('');
+function makeElement(tag, className, text) {
+  const el = document.createElement(tag);
+  if (className) el.className = className;
+  if (text !== undefined) el.textContent = text;
+  return el;
+}
 
-  const sourceChips = (sourceTypes || []).map((entry) => {
-    const src = typeof entry === 'string' ? entry : (entry && entry.src) ? entry.src : String(entry);
-    const display = typeof entry === 'object' && entry && entry.display ? entry.display : src.replace(/^T/i, '');
-    const pressed = selectedSourceMap[src] ? 'true' : 'false';
-    return '<button class="nl-chip" type="button" aria-pressed="' + pressed + '" data-nl-source="' + src + '">' + display + ' (' + (sc[src] || 0) + ')</button>';
-  }).join('');
+function createChip(attribute, key, label, pressed, tooltip) {
+  const chip = makeElement('button', 'nl-chip', label);
+  chip.type = 'button';
+  chip.setAttribute('aria-pressed', pressed ? 'true' : 'false');
+  chip.setAttribute(attribute, key);
+  if (tooltip) chip.title = tooltip;
+  return chip;
+}
 
-  const sourceRow = sourceChips
-    ? '<div class="nl-filter-row" data-nl-source-row>' + sourceChips + '</div>'
-    : '';
+// Construye el panel solo con nodos DOM y textContent: los nombres de fuente
+// son datos de terceros (nombres de fichero, titulos web) y nunca deben
+// interpretarse como HTML.
+function buildFilterContent(container, view) {
+  container.textContent = '';
 
-  return (
-    '<div class="nl-filter-title">' +
-    '<span><span id="nl-collapse-arrow" class="nl-collapse-arrow">▼</span> Filtros' + (EXTENSION_VERSION ? ' · v' + EXTENSION_VERSION : '') + ' <span id="nl-result-count" class="nl-result-count"></span></span>' +
-    '<span style="opacity:0.7;cursor:pointer;" data-nl-action="clear">Limpiar</span>' +
-    '</div>' +
-    '<div id="nl-filter-body">' +
-    '<div class="nl-filter-label">Tipo de contenido</div>' +
-    '<input type="search" class="nl-search" data-nl-search placeholder="Buscar guías..." />' +
-    '<div class="nl-filter-row" data-nl-row>' + studyChips + '</div>' +
-    '<hr class="nl-filter-divider" />' +
-    '<div class="nl-filter-label">Fuentes</div>' +
-    '<input type="search" class="nl-search" data-nl-source-search placeholder="Buscar fuente (ej: 047.md)..." />' +
-    sourceRow +
-    '</div>'
+  const title = makeElement('div', 'nl-filter-title');
+  const heading = makeElement('span');
+  const arrow = makeElement('span', 'nl-collapse-arrow', '▼');
+  arrow.id = 'nl-collapse-arrow';
+  const count = makeElement('span', 'nl-result-count');
+  count.id = 'nl-result-count';
+  heading.append(arrow, ' Filtros' + (EXTENSION_VERSION ? ' · v' + EXTENSION_VERSION : '') + ' ', count);
+  const clear = makeElement('span', '', 'Limpiar');
+  clear.style.opacity = '0.7';
+  clear.style.cursor = 'pointer';
+  clear.setAttribute('data-nl-action', 'clear');
+  title.append(heading, clear);
+
+  const body = makeElement('div');
+  body.id = 'nl-filter-body';
+
+  const search = makeElement('input', 'nl-search');
+  search.type = 'search';
+  search.placeholder = 'Buscar guías...';
+  search.setAttribute('data-nl-search', '');
+
+  const studyRow = makeElement('div', 'nl-filter-row');
+  studyRow.setAttribute('data-nl-row', '');
+  view.studyTypes.forEach((type) => {
+    studyRow.appendChild(createChip('data-nl-type', type, typeChipLabel(type, view.typeCounts), view.studyFilter[type]));
+  });
+
+  const sourceSearch = makeElement('input', 'nl-search');
+  sourceSearch.type = 'search';
+  sourceSearch.placeholder = 'Buscar fuente (ej: 047.md)...';
+  sourceSearch.setAttribute('data-nl-source-search', '');
+
+  body.append(
+    makeElement('div', 'nl-filter-label', 'Tipo de contenido'),
+    search,
+    studyRow,
+    makeElement('hr', 'nl-filter-divider'),
+    makeElement('div', 'nl-filter-label', 'Fuentes'),
+    sourceSearch
   );
+
+  if (view.sourceChips.length) {
+    const sourceRow = makeElement('div', 'nl-filter-row');
+    sourceRow.setAttribute('data-nl-source-row', '');
+    view.sourceChips.forEach((entry) => {
+      sourceRow.appendChild(createChip(
+        'data-nl-source', entry.src, sourceChipLabel(entry, view.sourceCounts), view.sourceFilter[entry.src], entry.display
+      ));
+    });
+    body.appendChild(sourceRow);
+  }
+
+  container.append(title, body);
 }
 
 function syncFilterUI(container, selectedStudyMap, selectedSourceMap) {
@@ -1196,7 +1240,14 @@ function updateFilterPanel(studyFilter, sourceFilter) {
   if (needsBuild) {
     const savedSearch = searchText;
     const savedSourceSearch = sourceSearchText;
-    container.innerHTML = buildFilterHTML(studyTypes, normalizedStudyFilter, sourceChips, sourceFilter, typeCounts, sourceCounts);
+    buildFilterContent(container, {
+      studyTypes,
+      studyFilter: normalizedStudyFilter,
+      sourceChips,
+      sourceFilter,
+      typeCounts,
+      sourceCounts,
+    });
     const searchInput = container.querySelector('[data-nl-search]');
     const sourceSearchInput = container.querySelector('[data-nl-source-search]');
     if (searchInput) searchInput.value = savedSearch;
