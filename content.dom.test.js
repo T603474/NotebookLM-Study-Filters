@@ -1047,3 +1047,49 @@ test('una fuente seleccionada que ya no esta en el modelo se muestra marcada y s
     .filter((item) => item.hasAttribute('hidden'));
   assert.equal(hidden.length, 0, 'tras desmarcarla no debe quedar nada oculto por la fuente fantasma');
 });
+
+// --- Integracion con la estructura real del cuaderno "0. Metodo - Practico" --
+// Sin esto, el parser descartaba los nombres de fuente y los artefactos de
+// tipo 10/11, y el panel mostraba "Fuente sin nombre" con recuentos de 5.
+test('del parser al panel: nombres reales de fuente y recuentos completos con artefactos de tipo 10 y 11', async () => {
+  const core = require('./filter-core');
+  const wrap = (rpc, payload) => `)]}'\n\n123\n${JSON.stringify([['wrb.fr', rpc, JSON.stringify(payload), null, null, null, 'generic']])}`;
+  const names = ['_BLOQUE_CANONICO_ELICITATION.md', '_CADENA_DECISION.md', '_CHULETA_PREGUNTAS_IDENTIFICACION.md',
+    '_FOLIO_EXAMEN.md', '_MAPA_MENTAL_EJ2.md', '_NOTACION_ESQUEMAS.md', '_PLANTILLAS_HERRAMIENTAS.md', '_VARIANTES_ENCARGO.md'];
+  const ids = names.map((_, i) => `0000000${i}-0000-4000-8000-00000000000${i}`);
+  const ENS = '658b36a6-8a6e-4def-9c1a-fa56c8ab4c80';
+  const allSources = ids.map((id) => [[id], null, 1, '1700000000000']);
+
+  const sourceRows = names.map((name, i) => [[ids[i]], name, [null, 10, [1700000000, 0], [`aaaaaaa${i}-0000-4000-8000-000000000000`, [1, 2]], 9], [null, 2]]);
+  sourceRows.push([[ENS], '11_ENS_Seguridad.md', [null, 10, [1700000000, 0], ['bbbbbbbb-0000-4000-8000-000000000000', [1, 2]], 9], [null, 2]]);
+  const artifactRows = [
+    ['e0000000-0000-4000-8000-000000000001', 'bpmn_diagrama_tramitacion.png', 10, allSources, 3],
+    ['e0000000-0000-4000-8000-000000000002', 'Control Táctico del Supuesto Práctico', 8, allSources, 3],
+    ['e0000000-0000-4000-8000-000000000003', 'Oposiciones AGE Test', 4, allSources, 3],
+    ['e0000000-0000-4000-8000-000000000004', 'Niveles de exigencia en examen', 7, allSources, 3],
+    ['e0000000-0000-4000-8000-000000000005', 'Análisis Estructurado Tarjetas', 4, allSources, 3],
+    ['e0000000-0000-4000-8000-000000000006', 'Trazabilidad Arquitectura', 5, allSources, 3],
+    ['e0000000-0000-4000-8000-000000000007', 'Seguridad Cuestionario', 4, [[[ENS]]], 3],
+    ['e0000000-0000-4000-8000-000000000008', 'Informe Interactivo de Dominio de la Metodología', 11, allSources, 3],
+  ];
+
+  const fromNotebook = core.parseNotebookBatchResponse(wrap('rLM1Ne', ['0. Método - Práctico', sourceRows, 'nb']));
+  const fromStudio = core.parseNotebookBatchResponse(wrap('gArtLc', [artifactRows]));
+  const snapshot = core.mergeMetadataSnapshot(
+    { sources: Array.from(fromNotebook.sources.entries()), artifacts: [] },
+    { sources: [], artifacts: fromStudio.artifacts }
+  );
+
+  const domArtifacts = artifactRows.map(([id, title, typeCode]) => ({ id, title, typeCode: typeCode === 1 ? 1 : 4 }));
+  const window = loadContentScript(buildDom({ artifacts: domArtifacts }));
+  await window.runOnce();
+  dispatchBridgeMetadata(window, snapshot);
+  await settle(window);
+  await window.runOnce();
+
+  assert.deepEqual(sourceChipLabels(window).sort(), [
+    ...names.map((name) => `${name} (7)`),
+    '11_ENS_Seguridad.md (1)',
+  ].sort());
+  assert.equal(window.__nlFilterModel().complete, true, 'los 8 elementos tienen metadatos: el modelo esta completo');
+});

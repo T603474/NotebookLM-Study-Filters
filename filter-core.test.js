@@ -448,3 +448,66 @@ test('reconcileSourceFilter es idempotente y no distingue mayusculas en los UUID
   const upper = reconcileSourceFilter(model, { ['ID:' + SRC_066.toUpperCase()]: true });
   assert.equal(upper.changed, false, 'el UUID en mayusculas sigue siendo la misma fuente');
 });
+
+// --- Formas reales de la API (hito 2) ---------------------------------------
+// Verificadas contra el cuaderno "0. Metodo - Practico" con el cliente del MCP:
+//  - rLM1Ne: cada fuente es [[uuid], titulo, [metadatos con otro uuid...], ...]
+//  - gArtLc: artefactos con typeCode 10 (archivo subido) y 11 (informe
+//    interactivo), ademas de 4, 7, 8...; las fuentes van en el indice 3.
+function wrap(rpc, payload) {
+  return `)]}'\n\n123\n${JSON.stringify([['wrb.fr', rpc, JSON.stringify(payload), null, null, null, 'generic']])}`;
+}
+
+test('reconoce las fuentes con el UUID envuelto en una lista ([[uuid], titulo, ...])', () => {
+  const SRC_A = '0e58e2c4-59dc-4c3f-8ecb-bfa3e246d3bf';
+  const SRC_B = '658b36a6-8a6e-4def-9c1a-fa56c8ab4c80';
+  const FILE_A = '11111111-aaaa-4bbb-8ccc-222222222222';
+  const FILE_B = '33333333-aaaa-4bbb-8ccc-444444444444';
+  const meta = (fileId) => [null, 1234, [1700000000, 0], [fileId, [1, 2]], 9, null, 1, null];
+  const notebook = [
+    '0. Método - Práctico',
+    [
+      [[SRC_A], '_CADENA_DECISION.md', meta(FILE_A), [null, 2], null, 'resumen', 'contenido'],
+      [[SRC_B], '11_ENS_Seguridad.md', meta(FILE_B), [null, 2], null, 'resumen', 'contenido'],
+    ],
+    '5dca60a2-7f13-478a-99ce-3d199731f162',
+  ];
+
+  const parsed = parseNotebookBatchResponse(wrap('rLM1Ne', notebook));
+
+  assert.equal(parsed.sources.get(SRC_A), '_CADENA_DECISION.md');
+  assert.equal(parsed.sources.get(SRC_B), '11_ENS_Seguridad.md');
+  assert.equal(parsed.sources.size, 2, 'los UUID de metadatos no son fuentes');
+  assert.deepEqual(parsed.artifacts, [], 'una fuente envuelta no debe confundirse con un artefacto');
+});
+
+test('reconoce artefactos con typeCode 10 (archivo) y 11 (informe interactivo) y sus fuentes', () => {
+  const SRC_A = '0e58e2c4-59dc-4c3f-8ecb-bfa3e246d3bf';
+  const SRC_B = '1afc3ce5-c8ae-41b7-a0cf-fbe77be9bf4a';
+  const PNG = '545b0eef-89c2-40d9-b726-a20411b08859';
+  const REPORT = '159f69d9-3e6e-4d78-9d92-a5f1acca03e5';
+  const QUIZ = '14b891e7-2b85-4831-bbf1-2bc24b1accee';
+  const sources = [[[SRC_A], null, 1, '1700000000000'], [[SRC_B], null, 1, '1700000000000']];
+  const rows = [
+    [PNG, 'bpmn_diagrama_tramitacion.png', 10, sources, 3],
+    [REPORT, 'Informe Interactivo de Dominio de la Metodología', 11, sources, 3],
+    [QUIZ, 'Seguridad Cuestionario', 4, [[[SRC_A]]], 3],
+  ];
+
+  const parsed = parseNotebookBatchResponse(wrap('gArtLc', [rows]));
+
+  assert.deepEqual(parsed.artifacts.map((a) => [a.id, a.typeCode, a.sourceIds]), [
+    [PNG, 10, [SRC_A, SRC_B]],
+    [REPORT, 11, [SRC_A, SRC_B]],
+    [QUIZ, 4, [SRC_A]],
+  ]);
+});
+
+test('un entero grande (marca de tiempo) en la posicion del tipo no convierte una fila en artefacto', () => {
+  const SRC_A = '0e58e2c4-59dc-4c3f-8ecb-bfa3e246d3bf';
+  const row = ['99999999-9999-4999-8999-999999999999', 'no es un artefacto', 1699999999, [[SRC_A]], 3];
+
+  const parsed = parseNotebookBatchResponse(wrap('rpc', [row]));
+
+  assert.deepEqual(parsed.artifacts, []);
+});

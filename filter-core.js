@@ -111,7 +111,10 @@
       && typeof row[1] === 'string'
       && Number.isInteger(row[2])
       && row[2] >= 1
-      && row[2] <= 9
+      // Codigos reales observados: 1-9 mas 10 (archivo subido) y 11 (informe
+      // interactivo). Se acota para no tratar como artefacto una fila cuyo
+      // campo en esa posicion es una marca de tiempo.
+      && row[2] <= 99
       // Un artefacto siempre enlaza con el UUID de al menos una fuente
       // distinta de si mismo; una fila de metadatos de fuente no suele
       // llevar otro UUID embebido. Esto evita que una fuente con un campo
@@ -143,6 +146,16 @@
       && isUuid(row[0])
       && Boolean(sourceTitleFromRow(row))
       && !isArtifactRow(row);
+  }
+
+  // Forma real de una fuente en la respuesta de rLM1Ne (verificada con el
+  // cliente del MCP): [[uuid], titulo, [metadatos...], ...]. El UUID va
+  // envuelto en una lista, por eso isSourceRow (uuid en row[0]) no la veia.
+  function wrappedSourceFromRow(row) {
+    if (!Array.isArray(row) || row.length < 2) return null;
+    if (!Array.isArray(row[0]) || !isUuid(row[0][0])) return null;
+    if (typeof row[1] !== 'string' || !row[1].trim()) return null;
+    return { id: row[0][0], title: row[1].trim() };
   }
 
   function parseJsonCandidate(value) {
@@ -184,7 +197,9 @@
         }
         return;
       }
-      if (isSourceRow(node)) sources.set(node[0], sourceTitleFromRow(node));
+      const wrapped = wrappedSourceFromRow(node);
+      if (wrapped) sources.set(wrapped.id, wrapped.title);
+      else if (isSourceRow(node)) sources.set(node[0], sourceTitleFromRow(node));
       node.forEach(visit);
     }
 

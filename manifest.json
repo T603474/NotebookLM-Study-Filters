@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Filtro de Estudio para Gemini Notebook",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "Filtra tipos de estudio y fuentes en Gemini Notebook (antes NotebookLM) sin romper la SPA.",
   "permissions": ["storage", "activeTab", "scripting"],
   "optional_host_permissions": [
