@@ -393,6 +393,16 @@ function injectStyles() {
       cursor: pointer;
       font-size: 11px;
     }
+    .nl-select-wrap {
+      position: absolute;
+      left: 2px;
+      top: 2px;
+      z-index: 3;
+      display: flex;
+      align-items: center;
+      cursor: pointer;
+    }
+    .nl-select { margin: 0; cursor: pointer; accent-color: #8ab4f8; }
     .nl-chip[aria-pressed="true"] {
       background: #8ab4f8;
       color: #202124;
@@ -453,6 +463,11 @@ let sourceKeyToIds = new Map();
 let lastArtifactIdOrder = [];
 let lastBridgePayload = '';
 let studyModel = FILTER_CORE.buildStudyModel([], {});
+const selectedArtifactIds = new Set();
+let bulkDeleteRunning = false;
+let bulkStatusText = '';
+// Tiempos del borrado en bloque (ms). Constantes con nombre; los tests los reducen.
+const BULK_DELETE = { menuMs: 2000, dialogMs: 2000, goneMs: 8000, stepMs: 50 };
 
 function isUuid(value) {
   return typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
@@ -686,7 +701,9 @@ function getArtifactId(item) {
       if (isUuid(value)) return value;
     }
   }
-  const candidates = [item, ...item.querySelectorAll('*')];
+  // Las casillas que inyecta la extension llevan el id del artefacto que
+  // vieron por ultima vez: no son evidencia del artefacto que muestra el nodo.
+  const candidates = [item, ...item.querySelectorAll('*')].filter((el) => !el.closest('.nl-select-wrap'));
   for (const element of candidates) {
     for (const attribute of element.attributes || []) {
       const matches = attribute.value.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/ig) || [];
@@ -755,6 +772,7 @@ function maybeResetMetadataCache() {
   sourceTitleById.clear();
   sourceKeyToIds.clear();
   lastArtifactIdOrder = [];
+  selectedArtifactIds.clear();
 }
 
 function refreshArtifactMetadata() {
@@ -878,6 +896,66 @@ function applyFilters(studyFilter, sourceFilter, searchText, sourceSearchText) {
   const hasActiveFilter = Boolean(activeStudyTypes.length || activeSources.length || query || sourceQuery);
   updateEmptyState(visibleCount, items.length > 0 && hasActiveFilter);
   updateResultCount(visibleCount, items.length);
+  syncSelection(items, model);
+}
+
+function selectionChanged() {
+  if (typeof syncBulkUI === 'function') syncBulkUI();
+}
+
+function makeSelectBox(artifactId) {
+  const wrap = document.createElement('label');
+  wrap.className = 'nl-select-wrap';
+  wrap.title = 'Seleccionar para borrar';
+  const box = document.createElement('input');
+  box.type = 'checkbox';
+  box.className = 'nl-select';
+  box.setAttribute('data-nl-select', artifactId);
+  box.setAttribute('aria-label', 'Seleccionar elemento de estudio');
+  // El clic de la casilla no debe llegar al elemento nativo (lo abriria).
+  wrap.addEventListener('click', (event) => event.stopPropagation());
+  box.addEventListener('change', () => {
+    if (box.checked) selectedArtifactIds.add(artifactId);
+    else selectedArtifactIds.delete(artifactId);
+    selectionChanged();
+  });
+  wrap.appendChild(box);
+  return wrap;
+}
+
+// Una casilla por elemento visible y enlazado a un artefacto; idempotente (no
+// toca el DOM si ya esta bien) para no realimentar al MutationObserver. Los
+// ids seleccionados que ya no estan visibles se descartan: lo oculto por un
+// filtro nunca se borra por accidente.
+function syncSelection(items, model) {
+  const visible = new Set();
+  items.forEach((item, index) => {
+    const artifactId = model.artifacts[index].id;
+    const eligible = Boolean(artifactId) && artifactMetaCache.has(artifactId) && !item.hasAttribute('hidden');
+    let wrap = item.querySelector(':scope > .nl-select-wrap');
+    if (!eligible) {
+      if (wrap) wrap.remove();
+      return;
+    }
+    visible.add(artifactId);
+    if (wrap && wrap.firstChild.getAttribute('data-nl-select') !== artifactId) {
+      wrap.remove();
+      wrap = null;
+    }
+    if (!wrap) {
+      wrap = makeSelectBox(artifactId);
+      if (!item.style.position) item.style.position = 'relative';
+      item.appendChild(wrap);
+    }
+    const box = wrap.firstChild;
+    const checked = selectedArtifactIds.has(artifactId);
+    if (box.checked !== checked) box.checked = checked;
+    if (box.disabled !== bulkDeleteRunning) box.disabled = bulkDeleteRunning;
+  });
+  for (const id of Array.from(selectedArtifactIds)) {
+    if (!visible.has(id)) selectedArtifactIds.delete(id);
+  }
+  selectionChanged();
 }
 
 function updateEmptyState(visibleCount, hasActiveFilter) {
@@ -1419,12 +1497,18 @@ function isInsideFilterPanel(node) {
 // cualquier actualizacion del panel (contador, estado vacio, aria-pressed)
 // realimentaria al observer y entraria en bucle infinito: applyFilters muta
 // el panel -> observer -> runOnce -> applyFilters -> muta el panel -> ...
+function isOwnNode(node) {
+  return node.nodeType === 1 && (node.classList.contains('nl-select-wrap') || node.id === 'nl-confirm');
+}
+
 function observerCallback(records) {
   for (const record of records) {
-    if (!isInsideFilterPanel(record.target)) {
-      scheduleScan();
-      return;
-    }
+    if (isInsideFilterPanel(record.target)) continue;
+    // Las casillas y el modal los inyecta esta extension: no son un cambio de la SPA.
+    const changed = [...record.addedNodes, ...record.removedNodes];
+    if (changed.length && changed.every(isOwnNode)) continue;
+    scheduleScan();
+    return;
   }
 }
 

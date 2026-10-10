@@ -180,6 +180,63 @@ function findSourceChip(window, labelPrefix) {
     .find((chip) => chip.textContent.trim().startsWith(labelPrefix));
 }
 
+// Maqueta de la UI nativa de Gemini Notebook: boton ⋮ por elemento, menu
+// superpuesto (Compartir ... Eliminar), dialogo "Eliminar Archivo?" con
+// Cancelar/Eliminar y borrado real del nodo al confirmar. Estructura tomada de
+// las capturas del usuario (la estructura interna exacta es una suposicion).
+function installNativeUiMock(window, opts = {}) {
+  const doc = window.document;
+  const log = [];
+  const overlay = doc.createElement('div');
+  overlay.className = 'cdk-overlay-container';
+  doc.body.appendChild(overlay);
+  const titleOf = (item) => item.querySelector('.artifact-title').textContent.trim();
+
+  function attach(item) {
+    if (item.querySelector('.mock-more')) return;
+    const more = doc.createElement('button');
+    more.className = 'mock-more';
+    more.innerHTML = '<mat-icon>more_vert</mat-icon>';
+    item.appendChild(more);
+    more.addEventListener('click', (event) => {
+      event.stopPropagation();
+      const title = titleOf(item);
+      if (opts.noMenuFor && opts.noMenuFor.has(title)) return;
+      overlay.innerHTML = '<div role="menu" class="mat-mdc-menu-panel">'
+        + '<button role="menuitem"><mat-icon>share</mat-icon><span>Compartir</span></button>'
+        + '<button role="menuitem"><mat-icon>edit</mat-icon><span>Cambiar nombre</span></button>'
+        + '<button role="menuitem" class="mock-delete"><mat-icon>delete</mat-icon><span>Eliminar</span></button>'
+        + '</div>';
+      overlay.querySelector('.mock-delete').addEventListener('click', () => {
+        overlay.innerHTML = '<div role="dialog" class="mat-mdc-dialog-container"><h2>Eliminar Archivo?</h2>'
+          + (opts.dialogWithoutCancel ? '' : '<button class="mock-cancel">Cancelar</button>')
+          + '<button class="mock-confirm">Eliminar</button></div>';
+        const cancel = overlay.querySelector('.mock-cancel');
+        if (cancel) cancel.addEventListener('click', () => { overlay.innerHTML = ''; });
+        overlay.querySelector('.mock-confirm').addEventListener('click', () => {
+          log.push(title);
+          overlay.innerHTML = '';
+          if (opts.recycleNodes) {
+            // Angular reutiliza el nodo para mostrar otro elemento en vez de eliminarlo.
+            item.querySelector('.artifact-title').textContent = 'Otro elemento reciclado';
+          } else {
+            item.remove();
+          }
+          if (opts.onDelete) opts.onDelete(title);
+        });
+      });
+    });
+  }
+
+  const attachAll = () => doc.querySelectorAll('artifact-library-item').forEach(attach);
+  attachAll();
+  return { log, overlay, attachAll };
+}
+
+function fastBulkTimeouts(window) {
+  vm.runInContext('BULK_DELETE.menuMs = 250; BULK_DELETE.dialogMs = 250; BULK_DELETE.goneMs = 250;', window);
+}
+
 async function loadWithMetadata(opts = {}) {
   const window = loadContentScript(buildDom(opts));
   await window.runOnce();
@@ -1092,4 +1149,55 @@ test('del parser al panel: nombres reales de fuente y recuentos completos con ar
     '11_ENS_Seguridad.md (1)',
   ].sort());
   assert.equal(window.__nlFilterModel().complete, true, 'los 8 elementos tienen metadatos: el modelo esta completo');
+});
+
+// --- Seleccion con casillas (hito 3) -----------------------------------------
+function selectBoxes(window) {
+  return Array.from(window.document.querySelectorAll('artifact-library-item .nl-select'));
+}
+
+test('cada elemento enlazado recibe una casilla y marcarla actualiza la seleccion', async () => {
+  const window = await loadWithMetadata();
+  const boxes = selectBoxes(window);
+  assert.equal(boxes.length, 6, 'una casilla por elemento enlazado');
+
+  boxes[0].click();
+  boxes[1].click();
+  await settle(window);
+
+  assert.equal(vm.runInContext('selectedArtifactIds.size', window), 2);
+  boxes[0].click();
+  await settle(window);
+  assert.equal(vm.runInContext('selectedArtifactIds.size', window), 1);
+});
+
+test('un elemento sin enlace a un artefacto no tiene casilla', async () => {
+  const extra = { id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', title: 'Elemento sin metadatos', typeCode: 4, sourceIds: [] };
+  const window = loadContentScript(buildDom({ artifacts: [...REAL_ARTIFACTS, extra] }));
+  await window.runOnce();
+  dispatchBridgeMetadata(window, { sources: REAL_SOURCES, artifacts: REAL_ARTIFACTS });
+  await settle(window);
+  await window.runOnce();
+
+  const unlinked = getItemByTitle(window, 'Elemento sin metadatos');
+  assert.equal(unlinked.querySelector('.nl-select'), null, 'sin id resoluble no se puede borrar de forma segura');
+  assert.equal(selectBoxes(window).length, 6);
+});
+
+test('pulsar la casilla no propaga el clic al elemento nativo', async () => {
+  const window = await loadWithMetadata();
+  let reached = 0;
+  const item = window.document.querySelector('artifact-library-item');
+  item.addEventListener('click', () => { reached += 1; });
+  item.querySelector('.nl-select').click();
+  assert.equal(reached, 0, 'el clic de la casilla no debe abrir el elemento');
+});
+
+test('inyectar casillas no realimenta al observer: en reposo no se programan escaneos', async () => {
+  const window = await loadWithMetadata();
+  let frames = 0;
+  const original = window.requestAnimationFrame;
+  window.requestAnimationFrame = (cb) => { frames += 1; return original(cb); };
+  await new Promise((resolve) => window.setTimeout(resolve, 150));
+  assert.equal(frames, 0, 'sin cambios externos no debe haber ningun escaneo pendiente');
 });
