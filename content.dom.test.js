@@ -91,7 +91,7 @@ function buildDom(opts = {}) {
     runtime: {
       id: 'test-extension-id',
       getManifest: () => ({ version: '0.0.0-test' }),
-      onMessage: { addListener: () => {} },
+      onMessage: { addListener: (listener) => { (opts.messageListeners || []).push(listener); } },
     },
     storage: {
       local: {
@@ -165,6 +165,19 @@ function dispatchBridgeMetadata(window, payload) {
 function getItemByTitle(window, title) {
   const items = Array.from(window.document.querySelectorAll('artifact-library-item'));
   return items.find((item) => item.querySelector('.artifact-title').textContent.trim() === title);
+}
+
+function typeChipText(window, type) {
+  return window.document.querySelector('[data-nl-type="' + type + '"]').textContent.trim();
+}
+
+function sourceChipLabels(window) {
+  return Array.from(window.document.querySelectorAll('[data-nl-source]')).map((chip) => chip.textContent.trim());
+}
+
+function findSourceChip(window, labelPrefix) {
+  return Array.from(window.document.querySelectorAll('[data-nl-source]'))
+    .find((chip) => chip.textContent.trim().startsWith(labelPrefix));
 }
 
 async function loadWithMetadata(opts = {}) {
@@ -263,7 +276,7 @@ test('source chips show a readable key derived from the artifact title when the 
 
   const labels = sourceChips.map((chip) => chip.label).sort();
   assert.deepEqual(labels, ['063 (1)', '064 (3)', '065 (1)', '066 (1)'], 'deberian verse las claves de tema, no fragmentos de UUID');
-  assert.ok(sourceChips.every((chip) => !chip.src.startsWith('ID:')), 'ningun chip deberia depender del fallback por UUID');
+  assert.ok(sourceChips.every((chip) => chip.src.startsWith('ID:')), 'cada chip de fuente se identifica por UUID (ID:<uuid>)');
 });
 
 test('clicking a resolved source chip filters by that source (symptom 4)', async () => {
@@ -275,8 +288,7 @@ test('clicking a resolved source chip filters by that source (symptom 4)', async
   await settle(window);
   await window.runOnce();
 
-  const chip064 = Array.from(window.document.querySelectorAll('[data-nl-source]'))
-    .find((el) => el.getAttribute('data-nl-source') === 'T064');
+  const chip064 = findSourceChip(window, '064');
   assert.ok(chip064, 'deberia existir un chip para la fuente 064');
 
   chip064.dispatchEvent(new window.Event('click', { bubbles: true, cancelable: true }));
@@ -352,10 +364,11 @@ test('resolves a readable source label from a real underscore-separated filename
   const sourceChips = Array.from(window.document.querySelectorAll('[data-nl-source]'))
     .map((chip) => ({ src: chip.getAttribute('data-nl-source'), label: chip.textContent.trim() }));
 
-  assert.deepEqual(sourceChips.map((c) => c.label).sort(), ['041 (3)'],
-    'el nombre real "Tema41_..._ESTUDIO.md"/"_EXAMEN.md" deberia resolver a la clave 041, no a un UUID');
-  assert.ok(sourceChips.every((chip) => !chip.src.startsWith('ID:')),
-    'con el nombre de fuente real disponible, no deberia hacer falta el fallback por UUID');
+  assert.deepEqual(sourceChips.map((c) => c.label).sort(), [
+    'Tema41_Desarrollo_Equipos_Departamentales_Dispositivos_Personales_Madrid_ESTUDIO.md (2)',
+    'Tema41_Desarrollo_Equipos_Departamentales_Dispositivos_Personales_Madrid_EXAMEN.md (1)',
+  ], 'ESTUDIO y EXAMEN son fuentes distintas: un chip por fuente, con su nombre real');
+  assert.ok(sourceChips.every((chip) => chip.src.startsWith('ID:')), 'los chips se identifican por UUID');
 });
 
 test('only falls back to a UUID chip for the one source with no derivable number, not for its siblings', async () => {
@@ -376,12 +389,8 @@ test('only falls back to a UUID chip for the one source with no derivable number
   const sourceChips = Array.from(window.document.querySelectorAll('[data-nl-source]'))
     .map((chip) => ({ src: chip.getAttribute('data-nl-source'), label: chip.textContent.trim() }));
 
-  const readable = sourceChips.filter((chip) => !chip.src.startsWith('ID:'));
-  const fallback = sourceChips.filter((chip) => chip.src.startsWith('ID:'));
-  assert.deepEqual(readable.map((c) => c.label), ['041 (1)'],
-    'el articulo "Claves y trampas del Tema 041 TIC" deberia bastar para derivar 041 sin metadatos de fuente');
-  assert.equal(fallback.length, 1,
-    'la fuente sin ningun numero derivable en su unico articulo debe caer al fallback por UUID, sin desaparecer');
+  assert.deepEqual(sourceChips.map((c) => c.label).sort(), ['041 (1)', 'Fuente sin nombre · 193e (2)'],
+    '041 se deriva del articulo "Claves y trampas del Tema 041 TIC"; la otra fuente no tiene nombre ni numero y sigue seleccionable');
 });
 
 test('type filtering still works with natural, non-templated artifact titles', async () => {
@@ -452,8 +461,8 @@ test('filtering still works when globalThis.NotebookFilterCore is unavailable (i
       .map((chip) => ({ src: chip.getAttribute('data-nl-source'), label: chip.textContent.trim() }));
   assert.deepEqual(sourceChips.map((c) => c.label).sort(), ['063 (1)', '064 (3)', '065 (1)', '066 (1)'],
     'los chips de fuente deben mostrar claves legibles derivadas del titulo del artefacto, no UUIDs (sintoma 2)');
-    assert.ok(sourceChips.every((chip) => !chip.src.startsWith('ID:')),
-      'ningun chip deberia caer al fallback por UUID cuando se puede derivar clave del titulo (sintoma 2)');
+    assert.ok(sourceChips.every((chip) => chip.src.startsWith('ID:')),
+      'los chips se identifican por UUID tambien con el fallback inline (sintoma 2)');
 
     // Sintoma 3: escribir "063.md" en la caja de fuente debe filtrar a la 063.
     const sourceInput = window.document.querySelector('[data-nl-source-search]');
@@ -697,8 +706,7 @@ test('los chips muestran el recuento de items por tipo y por fuente', async () =
   assert.ok(audioChip.textContent.includes('(4)'), 'el chip Audio debe mostrar (4)');
   assert.ok(quizChip.textContent.includes('(2)'), 'el chip Test debe mostrar (2)');
 
-  const chip064 = Array.from(window.document.querySelectorAll('[data-nl-source]'))
-    .find((c) => c.getAttribute('data-nl-source') === 'T064');
+  const chip064 = findSourceChip(window, '064');
   assert.ok(chip064, 'debe existir el chip de la fuente 064');
   assert.ok(chip064.textContent.includes('(3)'), 'la fuente 064 (3 items) debe mostrar (3)');
 });
@@ -828,4 +836,80 @@ test('al borrar uno de dos elementos con el mismo titulo, el otro sigue enlazado
   await window.runOnce();
 
   assert.equal(second.dataset.nlArtifactId, secondId);
+});
+
+// --- Panel derivado del modelo (spec v1.2.0, H1/H2/H5/H7) --------------------
+test('al borrar un elemento los recuentos de tipo y el contador se actualizan sin recargar', async () => {
+  const window = await loadWithMetadata();
+  assert.equal(typeChipText(window, 'audio'), 'Audio (4)');
+  assert.equal(window.document.getElementById('nl-result-count').textContent, 'Mostrando 6 de 6');
+
+  getItemByTitle(window, 'T66 - Audio - Test').remove();
+  await window.runOnce();
+
+  assert.equal(typeChipText(window, 'audio'), 'Audio (3)', 'el chip Audio debe descontar el elemento borrado');
+  assert.equal(typeChipText(window, 'quiz'), 'Test (2)');
+  assert.equal(window.document.getElementById('nl-result-count').textContent, 'Mostrando 5 de 5');
+});
+
+test('al borrar el ultimo elemento de una fuente su chip desaparece y las demas se mantienen', async () => {
+  const window = await loadWithMetadata();
+  assert.ok(findSourceChip(window, '066'), 'sanity: existe el chip 066');
+
+  getItemByTitle(window, 'T66 - Audio - Test').remove();
+  await window.runOnce();
+
+  assert.equal(findSourceChip(window, '066'), undefined, 'la fuente 066 ya no tiene elementos');
+  assert.deepEqual(sourceChipLabels(window), ['063.md (1)', '064.md (3)', '065.md (1)']);
+});
+
+test('al borrar todos los elementos no quedan chips de fuente, ni contador, ni estado vacio', async () => {
+  const window = await loadWithMetadata();
+  window.document.querySelectorAll('artifact-library-item').forEach((item) => item.remove());
+  await window.runOnce();
+
+  assert.equal(window.document.getElementById('nl-result-count').textContent, '',
+    'sin elementos no hay contador "Mostrando"');
+  assert.equal(window.document.querySelectorAll('[data-nl-source]').length, 0);
+  assert.equal(typeChipText(window, 'audio'), 'Audio (0)');
+  const empty = window.document.getElementById('nl-empty-state');
+  assert.ok(!empty || empty.hasAttribute('hidden'),
+    'una biblioteca vacia no debe mostrar "Ningun resultado con estos filtros"');
+});
+
+test('el cuadro de busqueda no se reconstruye cuando solo cambian los contadores', async () => {
+  const window = await loadWithMetadata();
+  const input = window.document.querySelector('[data-nl-search]');
+  input.value = 'texto en curso';
+  const twin = Array.from(window.document.querySelectorAll('artifact-library-item'))
+    .find((item) => item.querySelector('.artifact-title').textContent.trim() === 'T64 - Audio - Test');
+
+  twin.remove(); // la fuente 064 sigue existiendo: el conjunto de chips no cambia
+  await window.runOnce();
+
+  assert.equal(window.document.querySelector('[data-nl-search]'), input, 'el input debe seguir siendo el mismo nodo');
+  assert.equal(input.value, 'texto en curso');
+  assert.equal(findSourceChip(window, '064').textContent.trim(), '064.md (2)');
+});
+
+test('el popup recibe las fuentes como chips por UUID con su etiqueta', async () => {
+  const messageListeners = [];
+  await loadWithMetadata({ messageListeners });
+  const responses = [];
+  messageListeners.forEach((listener) => listener({ type: 'nl-get-available-sources' }, {}, (r) => responses.push(r)));
+
+  assert.equal(responses.length, 1);
+  // La respuesta se crea dentro del contexto vm (otro realm): Array.from la
+  // copia a un array del realm del test para que deepEqual compare prototipos.
+  assert.deepEqual(Array.from(responses[0].sources.map((s) => s.display)).sort(), ['063.md', '064.md', '065.md', '066.md']);
+  assert.ok(responses[0].sources.every((s) => s.src.startsWith('ID:')));
+  assert.deepEqual(Array.from(responses[0].studyTypes), ['audio', 'quiz']);
+});
+
+test('__nlFilterDebug sigue funcionando y devuelve el modelo', async () => {
+  const window = await loadWithMetadata();
+  window.console = { log() {}, table() {}, info() {}, error() {}, warn() {} };
+  const result = window.__nlFilterDebug();
+  assert.equal(result.model.artifacts.length, 6);
+  assert.equal(result.model.sources.length, 4);
 });

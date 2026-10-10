@@ -11,13 +11,14 @@
     return;
   }
   if (typeof refreshArtifactMetadata === 'function') refreshArtifactMetadata();
+  const model = (typeof window.__nlFilterModel === 'function') ? window.__nlFilterModel() : null;
   const items = Array.from(panel.querySelectorAll('artifact-library-item'));
   const rows = items.map((item, idx) => ({
     idx,
     title: (typeof getTitle === 'function') ? getTitle(item) : '',
     details: (typeof getDetails === 'function') ? getDetails(item) : '',
     kind: (typeof getArtifactKind === 'function') ? getArtifactKind(item) : '',
-    sources: (typeof getArtifactSourceKeys === 'function') ? Array.from(getArtifactSourceKeys(item)).join(', ') : '',
+    sources: model && model.artifacts[idx] ? model.artifacts[idx].sourceKeys.join(', ') : '',
     icons: Array.from(item.querySelectorAll('mat-icon')).map((el) => el.textContent.trim()).join(', '),
     artifactId: item.dataset.nlArtifactId || '',
   }));

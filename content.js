@@ -448,29 +448,14 @@ let sourceTitleById = new Map();
 let sourceKeyToIds = new Map();
 let lastArtifactIdOrder = [];
 let lastBridgePayload = '';
+let studyModel = FILTER_CORE.buildStudyModel([], {});
 
 function isUuid(value) {
   return typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 }
 
-function normalizeSourceKey(raw) {
-  return FILTER_CORE ? FILTER_CORE.normalizeSourceQuery(raw) : '';
-}
-
 function extractSourceKeysFromText(text) {
-  const keys = new Set();
-  if (!text) return keys;
-  // Delegamos en FILTER_CORE.sourceKeyFromTitle porque acepta el numero de
-  // fuente con o sin ".md" y con o sin prefijo "T" (mas laxo que las
-  // regex antiguas, que exigian literalmente ".md" o "T047").
-  const coreKey = FILTER_CORE ? FILTER_CORE.sourceKeyFromTitle(text) : '';
-  if (coreKey) keys.add(coreKey);
-  const tema = String(text).match(/\btema[\s_]*0*(\d{2,3})(?!\d)/i);
-  if (tema) {
-    const key = normalizeSourceKey(tema[1]);
-    if (key) keys.add(key);
-  }
-  return keys;
+  return FILTER_CORE.extractSourceKeys(text);
 }
 
 function registerSourceId(sourceId, title) {
@@ -481,18 +466,6 @@ function registerSourceId(sourceId, title) {
     if (!sourceKeyToIds.has(key)) sourceKeyToIds.set(key, new Set());
     sourceKeyToIds.get(key).add(sourceId);
   });
-}
-
-function sourceKeysForIds(sourceIds) {
-  const keys = new Set();
-  (sourceIds || []).forEach((sourceId) => {
-    const title = sourceTitleById.get(sourceId);
-    if (title) extractSourceKeysFromText(title).forEach((key) => keys.add(key));
-    for (const [key, ids] of sourceKeyToIds.entries()) {
-      if (ids.has(sourceId)) keys.add(key);
-    }
-  });
-  return keys;
 }
 
 function refreshIconTypeMap() {
@@ -603,15 +576,10 @@ function ingestBridgePayload(payload) {
     artifactMetaCache.set(artifact.id, {
       kind: typeCodeToKind(artifact.typeCode),
       sourceIds: artifact.sourceIds || [],
-      sourceKeys: sourceKeysForIds(artifact.sourceIds || []),
       title: artifact.title || '',
       typeCode: artifact.typeCode,
     });
   });
-
-  for (const meta of artifactMetaCache.values()) {
-    meta.sourceKeys = sourceKeysForIds(meta.sourceIds);
-  }
 
   const domItemCount = getArtifactItems(document).length;
   if (artifactOrder.length > 1 || domItemCount === artifactOrder.length) {
@@ -797,30 +765,6 @@ function getArtifactKind(item) {
   return 'other';
 }
 
-function getArtifactSourceKeys(item) {
-  const artifactId = getArtifactId(item);
-  const keys = new Set();
-  const cached = artifactId ? artifactMetaCache.get(artifactId) : null;
-  if (cached && cached.sourceKeys) cached.sourceKeys.forEach((key) => keys.add(key));
-  if (cached && cached.sourceIds) sourceKeysForIds(cached.sourceIds).forEach((key) => keys.add(key));
-  return keys;
-}
-
-function getArtifactSourceNames(item) {
-  const artifactId = getArtifactId(item);
-  const cached = artifactId ? artifactMetaCache.get(artifactId) : null;
-  if (!cached?.sourceIds) return [];
-  return cached.sourceIds
-    .map((sourceId) => sourceTitleById.get(sourceId))
-    .filter(Boolean);
-}
-
-function getArtifactSourceIds(item) {
-  const artifactId = getArtifactId(item);
-  const cached = artifactId ? artifactMetaCache.get(artifactId) : null;
-  return (cached && cached.sourceIds) || [];
-}
-
 function getTitle(item) {
   const titleEl = item.querySelector('.artifact-title, [class*="artifact-title"]');
   return titleEl ? titleEl.textContent.trim() : '';
@@ -831,59 +775,32 @@ function getDetails(item) {
   return detailsEl ? detailsEl.textContent.trim() : '';
 }
 
-function getDisplayStudyTypes(items) {
-  const discovered = new Set();
-  for (const item of items) {
-    const kind = getArtifactKind(item);
-    if (kind) discovered.add(kind);
-  }
-  const merged = new Set([...DEFAULT_STUDY_TYPES, ...discovered]);
+function getDisplayStudyTypes(model) {
+  const merged = new Set([...DEFAULT_STUDY_TYPES, ...Object.keys(model.counts.byKind)]);
   return [ALL_TYPES_KEY, ...Array.from(merged).filter((t) => t !== ALL_TYPES_KEY).sort()];
 }
 
-function sourceDisplayLabel(sourceId) {
-  const title = sourceTitleById.get(sourceId);
-  if (title) return title;
-  return 'Fuente ' + sourceId.slice(0, 8);
+// Reconstruye el modelo desde lo que hay AHORA en el DOM. La cache de red solo
+// aporta las fuentes de cada artefacto y los titulos de fuente.
+function refreshStudyModel(items) {
+  const domItems = items.map((item) => ({
+    id: getArtifactId(item),
+    title: getTitle(item),
+    kind: getArtifactKind(item),
+  }));
+  studyModel = FILTER_CORE.buildStudyModel(domItems, {
+    artifacts: artifactMetaCache,
+    sourceTitles: sourceTitleById,
+  });
+  return studyModel;
 }
 
-function getSourcesWithArtifacts(items) {
-  const sourceIds = new Set();
-  for (const meta of artifactMetaCache.values()) {
-    (meta.sourceIds || []).forEach((id) => sourceIds.add(id));
-  }
-  for (const item of items) {
-    getArtifactSourceIds(item).forEach((id) => sourceIds.add(id));
-  }
-  const prefix = FILTER_CORE ? FILTER_CORE.SOURCE_ID_PREFIX : 'ID:';
-  const result = [];
-  const seenKey = new Set();
-  for (const sourceId of sourceIds) {
-    const keys = sourceKeysForIds([sourceId]);
-    if (keys.size) {
-      const key = Array.from(keys).sort()[0];
-      if (seenKey.has(key)) continue;
-      seenKey.add(key);
-      // Mostrar el titulo completo (p.ej. "063.md") solo cuando la clave
-      // representa a una unica fuente con titulo conocido; si varias fuentes
-      // comparten la misma clave (p.ej. ESTUDIO + EXAMEN del mismo tema) se
-      // muestra el numero de tema para no elegir un titulo arbitrario.
-      const idsForKey = sourceKeyToIds.get(key);
-      const singleTitle = idsForKey && idsForKey.size === 1
-        ? sourceTitleById.get(Array.from(idsForKey)[0])
-        : '';
-      result.push({ src: key, display: singleTitle || key.replace(/^T/i, '') });
-    } else {
-      // Sin clave derivable: si hay titulo real (p.ej. "Informe_..._Obsoleta.md")
-      // se muestra; si no, fallback por UUID para seguir siendo seleccionable.
-      result.push({ src: prefix + sourceId, display: sourceDisplayLabel(sourceId) });
-    }
-  }
-  return result.sort((a, b) => a.display.localeCompare(b.display, undefined, { numeric: true }));
-}
-
-function getAllSources(items) {
-  return getSourcesWithArtifacts(items);
+function sourceChipsFromModel(model) {
+  return model.sources.map((source) => ({
+    src: FILTER_CORE.SOURCE_ID_PREFIX + source.id,
+    id: source.id,
+    display: source.label,
+  }));
 }
 
 function getArtifactItems(root) {
@@ -908,7 +825,7 @@ function applyFilters(studyFilter, sourceFilter, searchText, sourceSearchText) {
 
   linkDomArtifactsToMetadata();
   const items = getArtifactItems(panel);
-  if (!items.length) return;
+  const model = refreshStudyModel(items);
 
   const activeStudyTypes = Object.keys(studyFilter).filter((k) => studyFilter[k]);
   const activeSources = Object.keys(sourceFilter).filter((k) => sourceFilter[k]);
@@ -916,23 +833,19 @@ function applyFilters(studyFilter, sourceFilter, searchText, sourceSearchText) {
   const sourceQuery = (sourceSearchText || '').trim().toLowerCase();
 
   let visibleCount = 0;
-  for (const item of items) {
+  items.forEach((item, index) => {
+    const artifact = model.artifacts[index];
+    const matchesMetadata = FILTER_CORE.artifactMatchesFilters(
+      {
+        kind: artifact.kind,
+        sourceKeys: artifact.sourceKeys,
+        sourceNames: artifact.sourceNames,
+        sourceIds: artifact.sourceIds,
+      },
+      { activeTypes: activeStudyTypes, activeSources, sourceQuery }
+    );
     const title = getTitle(item);
     const details = getDetails(item);
-    const kind = getArtifactKind(item);
-    const sourceKeys = getArtifactSourceKeys(item);
-    const sourceNames = getArtifactSourceNames(item);
-    const sourceIds = getArtifactSourceIds(item);
-    const matchesMetadata = FILTER_CORE
-      ? FILTER_CORE.artifactMatchesFilters(
-        { kind, sourceKeys, sourceNames, sourceIds },
-        {
-          activeTypes: activeStudyTypes,
-          activeSources,
-          sourceQuery,
-        }
-      )
-      : true;
     const matchesSearch = !query || title.toLowerCase().includes(query) || details.toLowerCase().includes(query);
 
     if (!matchesMetadata || !matchesSearch) {
@@ -941,9 +854,11 @@ function applyFilters(studyFilter, sourceFilter, searchText, sourceSearchText) {
       showElement(item);
       visibleCount++;
     }
-  }
+  });
 
-  updateEmptyState(visibleCount, activeStudyTypes.length || activeSources.length || Boolean(query) || Boolean(sourceQuery));
+  // Sin elementos no hay nada que filtrar: ni estado vacio ni contador.
+  const hasActiveFilter = Boolean(activeStudyTypes.length || activeSources.length || query || sourceQuery);
+  updateEmptyState(visibleCount, items.length > 0 && hasActiveFilter);
   updateResultCount(visibleCount, items.length);
 }
 
@@ -976,30 +891,33 @@ function updateResultCount(visibleCount, total) {
   if (el.textContent !== newText) el.textContent = newText;
 }
 
-function computeChipCounts(items, studyTypes, sourceTypes) {
-  const prefix = FILTER_CORE ? FILTER_CORE.SOURCE_ID_PREFIX : 'ID:';
-  const typeCounts = {};
-  for (const type of studyTypes) typeCounts[type] = 0;
+function typeChipLabel(type, typeCounts) {
+  return type === ALL_TYPES_KEY ? typeLabel(type) : typeLabel(type) + ' (' + (typeCounts[type] || 0) + ')';
+}
+
+function sourceChipLabel(entry, sourceCounts) {
+  return entry.display + ' (' + (sourceCounts[entry.src] || 0) + ')';
+}
+
+function chipCountsForView(model, sourceChips) {
   const sourceCounts = {};
-  for (const entry of sourceTypes) {
-    const src = typeof entry === 'string' ? entry : entry && entry.src;
-    if (src) sourceCounts[src] = 0;
-  }
-  for (const item of items) {
-    const kind = getArtifactKind(item);
-    if (kind && typeCounts[kind] !== undefined) typeCounts[kind]++;
-    const keys = getArtifactSourceKeys(item);
-    const ids = getArtifactSourceIds(item);
-    for (const src of Object.keys(sourceCounts)) {
-      if (src.startsWith(prefix)) {
-        const targetId = src.slice(prefix.length).toLowerCase();
-        if (ids.some((id) => String(id).toLowerCase() === targetId)) sourceCounts[src]++;
-      } else if (keys.has(src)) {
-        sourceCounts[src]++;
-      }
-    }
-  }
-  return { typeCounts, sourceCounts };
+  for (const entry of sourceChips) sourceCounts[entry.src] = model.counts.bySourceId[entry.id] || 0;
+  return { typeCounts: model.counts.byKind, sourceCounts };
+}
+
+// Actualiza en sitio el texto (nombre + recuento) de los chips existentes, sin
+// reconstruir el panel: conserva foco y texto de los buscadores.
+function syncChipLabels(container, sourceChips, typeCounts, sourceCounts) {
+  const setText = (chip, text) => { if (chip.textContent !== text) chip.textContent = text; };
+  container.querySelectorAll('[data-nl-row] .nl-chip').forEach((chip) => {
+    const type = chip.getAttribute('data-nl-type');
+    if (type) setText(chip, typeChipLabel(type, typeCounts));
+  });
+  const entries = new Map(sourceChips.map((entry) => [entry.src, entry]));
+  container.querySelectorAll('[data-nl-source-row] .nl-chip').forEach((chip) => {
+    const entry = entries.get(chip.getAttribute('data-nl-source'));
+    if (entry) setText(chip, sourceChipLabel(entry, sourceCounts));
+  });
 }
 
 function buildFilterHTML(studyTypes, selectedStudyMap, sourceTypes, selectedSourceMap, typeCounts, sourceCounts) {
@@ -1162,10 +1080,6 @@ function studyTypesKey(types) {
   return types.join('|');
 }
 
-function sourceTypesKey(types) {
-  return types.map((entry) => (typeof entry === 'string' ? entry : entry.src)).join('|');
-}
-
 function findStudioPanel() {
   const items = document.querySelectorAll('artifact-library-item');
   if (items.length) {
@@ -1257,34 +1171,33 @@ function updateFilterPanel(studyFilter, sourceFilter) {
 
   refreshArtifactMetadata();
   const items = getArtifactItems(panel);
-  const studyTypes = getDisplayStudyTypes(items);
-  const sourceTypes = getAllSources(items);
+  const model = refreshStudyModel(items);
+  const studyTypes = getDisplayStudyTypes(model);
+  const sourceChips = sourceChipsFromModel(model);
   const normalizedStudyFilter = normalizeStudyFilter(studyFilter);
-
-  const newStudyKey = studyTypesKey(studyTypes);
-  const newSourceKey = sourceTypesKey(sourceTypes);
 
   const container = ensureFilterPanelExists();
   if (!container) return null;
 
-  const chipsChanged = newStudyKey !== cachedStudyTypesKey || newSourceKey !== cachedSourceTypesKey;
-  const needsBuild = chipsChanged || !container.querySelector('[data-nl-row]');
+  const chipSetKey = studyTypesKey(studyTypes) + '#' + sourceChips.map((entry) => entry.src).join('|');
+  const needsBuild = chipSetKey !== container.getAttribute('data-nl-chip-set')
+    || !container.querySelector('[data-nl-row]');
+  const { typeCounts, sourceCounts } = chipCountsForView(model, sourceChips);
 
   if (needsBuild) {
     const savedSearch = searchText;
     const savedSourceSearch = sourceSearchText;
-    const counts = computeChipCounts(items, studyTypes, sourceTypes);
-    container.innerHTML = buildFilterHTML(studyTypes, normalizedStudyFilter, sourceTypes, sourceFilter, counts.typeCounts, counts.sourceCounts);
+    container.innerHTML = buildFilterHTML(studyTypes, normalizedStudyFilter, sourceChips, sourceFilter, typeCounts, sourceCounts);
     const searchInput = container.querySelector('[data-nl-search]');
     const sourceSearchInput = container.querySelector('[data-nl-source-search]');
     if (searchInput) searchInput.value = savedSearch;
     if (sourceSearchInput) sourceSearchInput.value = savedSourceSearch;
     attachSearch(container);
     attachChipListeners(container);
-    cachedStudyTypesKey = newStudyKey;
-    cachedSourceTypesKey = newSourceKey;
+    container.setAttribute('data-nl-chip-set', chipSetKey);
   } else {
     syncFilterUI(container, normalizedStudyFilter, sourceFilter);
+    syncChipLabels(container, sourceChips, typeCounts, sourceCounts);
   }
 
   applyFilters(normalizedStudyFilter, sourceFilter, searchText, sourceSearchText);
@@ -1299,8 +1212,6 @@ function cleanupFilterPanel() {
   if (panel) panel.remove();
   const styles = document.getElementById('nl-filter-styles');
   if (styles) styles.remove();
-  cachedStudyTypesKey = '';
-  cachedSourceTypesKey = '';
   searchText = '';
   sourceSearchText = '';
 }
@@ -1400,8 +1311,6 @@ function saveStudyFilter(data) {
 let searchText = '';
 let sourceSearchText = '';
 let collapsed = false;
-let cachedStudyTypesKey = '';
-let cachedSourceTypesKey = '';
 let initRetryTimer = null;
 let scanObserver = null;
 let observedRoot = null;
@@ -1534,6 +1443,9 @@ function updateCollapseArrow() {
 // Muestra cuantas fuentes y artefactos se han capturado via batchexecute
 // y cuales quedarian como chip de respaldo por UUID en la seccion FUENTE.
 window.__nlFilterCoreSource = FILTER_CORE_SOURCE;
+window.__nlFilterModel = function () {
+  return refreshStudyModel(getArtifactItems(findStudioPanel() || document));
+};
 window.__nlFilterDebug = function () {
   const sources = Array.from(sourceTitleById.entries()).map(([id, title]) => ({
     id,
@@ -1546,7 +1458,6 @@ window.__nlFilterDebug = function () {
     kind: meta.kind,
     typeCode: meta.typeCode,
     sourceIds: (meta.sourceIds || []).join(', '),
-    sourceKeys: Array.from(meta.sourceKeys || []).join(', '),
     domLinked: Array.from(document.querySelectorAll('artifact-library-item'))
       .some((item) => item.dataset.nlArtifactId === id),
   }));
@@ -1562,7 +1473,16 @@ window.__nlFilterDebug = function () {
   console.log('[NL Filter] FILTER_CORE:', FILTER_CORE_SOURCE, '(' + (FILTER_CORE ? 'definido' : 'INDEFINIDO - el filtrado no funcionara') + ')');
   console.table(sources);
   console.table(artifacts);
-  return { sources, artifacts, activeTypes, activeSourceChips, searchText, sourceSearchText };
+  const model = window.__nlFilterModel();
+  console.log('[NL Filter] modelo:', model.artifacts.length, 'elementos,', model.sources.length, 'fuentes, completo =', model.complete);
+  console.table(model.sources.map((s) => ({
+    id: s.id,
+    label: s.label,
+    nameKnown: s.nameKnown,
+    keys: s.keys.join(', '),
+    elementos: model.counts.bySourceId[s.id],
+  })));
+  return { sources, artifacts, activeTypes, activeSourceChips, searchText, sourceSearchText, model };
 };
 
 function main() {
@@ -1619,14 +1539,10 @@ if (!window.__nlMessageListenerInstalled) {
     }
     refreshArtifactMetadata();
     const items = getArtifactItems(panel);
-    const studyTypeSet = new Set();
-    for (const item of items) {
-      const kind = getArtifactKind(item);
-      if (kind) studyTypeSet.add(kind);
-    }
+    const model = refreshStudyModel(items);
     sendResponse({
-      sources: getSourcesWithArtifacts(items),
-      studyTypes: Array.from(studyTypeSet).sort(),
+      sources: sourceChipsFromModel(model).map(({ src, display }) => ({ src, display })),
+      studyTypes: Object.keys(model.counts.byKind).sort(),
     });
   });
 }
