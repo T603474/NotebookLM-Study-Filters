@@ -689,18 +689,25 @@ function scanSourcesPanel() {
     if (textUuid) uuidCandidates.push(textUuid[0]);
     const sourceId = uuidCandidates.find(isUuid);
 
+    // El panel nativo es solo un respaldo: nunca pisa un nombre que ya llego
+    // de la red (la lista de fuentes de rLM1Ne es la autoridad).
     if (sourceId) {
-      registerSourceId(sourceId, title);
+      if (!sourceTitleById.get(sourceId)) registerSourceId(sourceId, title);
       return;
     }
     // Sin UUID en el row: enlazar por clave. Si "063.md" -> clave "T063" y
-    // esa clave ya esta mapeada a un sourceId via los titulos de artefactos,
-    // registramos el titulo real para ese sourceId. Si no hay mapeo, al menos
-    // reservamos la clave para futuros enlaces.
+    // esa clave esta mapeada a UNA sola fuente sin nombre, se le da el titulo.
+    // Si la clave abarca varias fuentes (la deriva de los titulos de los
+    // artefactos, que reparten un "10" entre todas sus fuentes) es ambigua y
+    // asignarla a todas duplicaria el nombre. Si no hay mapeo, se reserva la
+    // clave para futuros enlaces.
     extractSourceKeysFromText(title).forEach((key) => {
       const ids = sourceKeyToIds.get(key);
       if (ids && ids.size) {
-        ids.forEach((id) => registerSourceId(id, title));
+        if (ids.size === 1) {
+          const [id] = Array.from(ids);
+          if (!sourceTitleById.get(id)) registerSourceId(id, title);
+        }
       } else if (!sourceKeyToIds.has(key)) {
         sourceKeyToIds.set(key, new Set());
       }

@@ -1608,3 +1608,46 @@ test('si la lista no deja localizar con seguridad el elemento seleccionado, se p
   assert.equal(ui.log.length, 0);
   assert.match(statusText(window), /Borrados 0 de 1; falló en «T66 - Audio - Test»: no localizo/);
 });
+
+// --- Nombres duplicados por el respaldo del panel Fuentes (v1.3.2) -----------
+// Una fila del panel nativo sin UUID ("10_Arquitectura_Fisica_y_Red.md") daba
+// la clave T010 y su nombre se asignaba a TODAS las fuentes de cualquier
+// artefacto cuyo titulo mencionara un "10", pisando el nombre real de la red.
+const DUP_IDS = ['aaaaaaa1-0000-4000-8000-000000000001', 'aaaaaaa2-0000-4000-8000-000000000002', 'aaaaaaa3-0000-4000-8000-000000000003'];
+const DUP_ARTIFACTS = [{ id: 'bbbbbbb1-0000-4000-8000-000000000001', title: 'Mapa del tema 10', typeCode: 4, sourceIds: DUP_IDS }];
+
+function addSourcesPanelRow(window, text) {
+  let panel = window.document.querySelector('.source-panel');
+  if (!panel) {
+    panel = window.document.createElement('div');
+    panel.className = 'source-panel';
+    window.document.body.appendChild(panel);
+  }
+  panel.insertAdjacentHTML('beforeend', `<div class="single-source-container"><span class="source-title">${text}</span></div>`);
+}
+
+test('una fila del panel Fuentes sin UUID no pisa el nombre de red de varias fuentes que comparten clave', async () => {
+  const window = loadContentScript(buildDom({ artifacts: DUP_ARTIFACTS }));
+  addSourcesPanelRow(window, '10_Arquitectura_Fisica_y_Red.md');
+  await window.runOnce();
+  dispatchBridgeMetadata(window, {
+    sources: [[DUP_IDS[0], 'Alfa.md'], [DUP_IDS[1], 'Beta.md'], [DUP_IDS[2], 'Gamma.md']],
+    artifacts: DUP_ARTIFACTS,
+  });
+  await settle(window);
+  await window.runOnce();
+
+  assert.deepEqual(sourceChipLabels(window).sort(), ['Alfa.md (1)', 'Beta.md (1)', 'Gamma.md (1)']);
+});
+
+test('una fila del panel sin UUID solo da nombre a una fuente sin nombre cuando la clave es inequivoca', async () => {
+  const one = [{ id: 'bbbbbbb2-0000-4000-8000-000000000002', title: 'Informe T10', typeCode: 4, sourceIds: [DUP_IDS[0]] }];
+  const window = loadContentScript(buildDom({ artifacts: one }));
+  addSourcesPanelRow(window, '10_Arquitectura_Fisica_y_Red.md');
+  await window.runOnce();
+  dispatchBridgeMetadata(window, { sources: [], artifacts: one });
+  await settle(window);
+  await window.runOnce();
+
+  assert.deepEqual(sourceChipLabels(window), ['10_Arquitectura_Fisica_y_Red.md (1)']);
+});
