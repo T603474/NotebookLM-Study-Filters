@@ -1172,6 +1172,15 @@ function updateFilterPanel(studyFilter, sourceFilter) {
   refreshArtifactMetadata();
   const items = getArtifactItems(panel);
   const model = refreshStudyModel(items);
+
+  // Migra claves antiguas (Tnnn) a UUID y poda selecciones de fuentes que ya
+  // no existen. Solo actua con el modelo completo (ver reconcileSourceFilter).
+  const reconciled = FILTER_CORE.reconcileSourceFilter(model, sourceFilter);
+  if (reconciled.changed) {
+    sourceFilter = reconciled.filter;
+    saveStudyFilter({ studyTypes: studyFilter, sourceTypes: sourceFilter });
+  }
+
   const studyTypes = getDisplayStudyTypes(model);
   const sourceChips = sourceChipsFromModel(model);
   const normalizedStudyFilter = normalizeStudyFilter(studyFilter);

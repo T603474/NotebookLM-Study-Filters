@@ -913,3 +913,60 @@ test('__nlFilterDebug sigue funcionando y devuelve el modelo', async () => {
   assert.equal(result.model.artifacts.length, 6);
   assert.equal(result.model.sources.length, 4);
 });
+
+// --- Filtro de fuentes guardado: migracion y poda (spec v1.2.0, H3) ----------
+const NB_ID = '66d41b00-97bc-4f4c-a871-ba9f634f8b78';
+const SOURCE_KEY = 'sourceTypes:' + NB_ID;
+const SRC_064_ID = 'ea0a4122-c95a-4db3-a09d-d78439d5ccc2';
+const SRC_066_ID = '29e4fde1-ba03-4f8f-ad2f-3192805aeef7';
+
+function activeSourceKeys(store) {
+  const saved = store[SOURCE_KEY] || {};
+  return Object.keys(saved).filter((key) => saved[key]);
+}
+
+test('al borrar el ultimo elemento de una fuente seleccionada, el filtro guardado se poda y no se oculta todo', async () => {
+  const store = {};
+  const window = await loadWithMetadata({ store });
+  findSourceChip(window, '066').dispatchEvent(new window.Event('click', { bubbles: true, cancelable: true }));
+  await settle(window);
+  assert.deepEqual(activeSourceKeys(store), ['ID:' + SRC_066_ID], 'sanity: la seleccion se guarda por UUID');
+
+  getItemByTitle(window, 'T66 - Audio - Test').remove();
+  await window.runOnce();
+
+  const visible = Array.from(window.document.querySelectorAll('artifact-library-item'))
+    .filter((item) => !item.hasAttribute('hidden'));
+  assert.equal(visible.length, 5, 'sin la fuente 066 el filtro no debe seguir ocultando el resto');
+  assert.equal(Object.keys(store[SOURCE_KEY]).includes('ID:' + SRC_066_ID), false,
+    'la seleccion huerfana debe desaparecer tambien del almacenamiento');
+});
+
+test('un filtro de fuente guardado con claves antiguas (T064) se migra a UUID cuando los metadatos estan completos', async () => {
+  const store = { [SOURCE_KEY]: { T064: true } };
+  const window = await loadWithMetadata({ store });
+
+  assert.equal(findSourceChip(window, '064').getAttribute('aria-pressed'), 'true',
+    'el chip de la fuente 064 debe quedar marcado tras migrar');
+  assert.deepEqual(plain(store[SOURCE_KEY]), { ['ID:' + SRC_064_ID]: true });
+  assert.equal(getItemByTitle(window, 'T65 - Audio - Test').hasAttribute('hidden'), true);
+  assert.equal(getItemByTitle(window, 'T64 - Test - Test').hasAttribute('hidden'), false);
+});
+
+// Guarda (pasa antes y despues): el DOM se pinta antes de que lleguen los
+// metadatos, y en ese momento la seleccion guardada NO debe podarse.
+test('no se poda la seleccion guardada mientras los metadatos no han llegado', async () => {
+  const store = { [SOURCE_KEY]: { ['ID:' + SRC_066_ID]: true } };
+  const window = loadContentScript(buildDom({ store }));
+  await window.runOnce(); // hay elementos en el DOM pero aun no hay metadatos
+
+  assert.deepEqual(store[SOURCE_KEY], { ['ID:' + SRC_066_ID]: true },
+    'sin metadatos no se puede saber que fuentes existen');
+
+  dispatchBridgeMetadata(window, { sources: REAL_SOURCES, artifacts: REAL_ARTIFACTS });
+  await settle(window);
+  await window.runOnce();
+
+  assert.deepEqual(store[SOURCE_KEY], { ['ID:' + SRC_066_ID]: true });
+  assert.equal(findSourceChip(window, '066').getAttribute('aria-pressed'), 'true');
+});
