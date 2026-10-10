@@ -403,6 +403,19 @@ function injectStyles() {
       cursor: pointer;
     }
     .nl-select { margin: 0; cursor: pointer; accent-color: #8ab4f8; }
+    .nl-btn {
+      appearance: none;
+      border: 1px solid #8ab4f8;
+      background: transparent;
+      color: #e8eaed;
+      padding: 3px 8px;
+      border-radius: 16px;
+      cursor: pointer;
+      font-size: 11px;
+    }
+    .nl-btn:disabled { opacity: 0.4; cursor: default; }
+    .nl-btn-danger { border-color: #f28b82; color: #f28b82; }
+    .nl-bulk-status { font-size: 11px; color: #9aa0a6; padding: 2px; min-height: 14px; }
     .nl-chip[aria-pressed="true"] {
       background: #8ab4f8;
       color: #202124;
@@ -1090,7 +1103,82 @@ function buildFilterContent(container, view) {
     body.appendChild(sourceRow);
   }
 
+  const actions = makeElement('div', 'nl-filter-row');
+  actions.setAttribute('data-nl-actions-row', '');
+  [['select-visible', 'Seleccionar visibles'], ['select-none', 'Ninguno'], ['delete-selected', 'Borrar (0)']].forEach(([action, label]) => {
+    const button = makeElement('button', action === 'delete-selected' ? 'nl-btn nl-btn-danger' : 'nl-btn', label);
+    button.type = 'button';
+    button.setAttribute('data-nl-action', action);
+    actions.appendChild(button);
+  });
+  // El texto de estado sobrevive a la reconstruccion del panel (p. ej. cuando
+  // desaparece un chip de fuente tras borrar).
+  const status = makeElement('div', 'nl-bulk-status', bulkStatusText);
+  status.id = 'nl-bulk-status';
+  status.setAttribute('role', 'status');
+  status.setAttribute('aria-live', 'polite');
+  body.append(
+    makeElement('hr', 'nl-filter-divider'),
+    makeElement('div', 'nl-filter-label', 'Elementos'),
+    actions,
+    status
+  );
+
   container.append(title, body);
+}
+
+function setBulkStatus(text) {
+  bulkStatusText = text;
+  const status = document.getElementById('nl-bulk-status');
+  if (status && status.textContent !== text) status.textContent = text;
+}
+
+// Recalcula el modelo y repinta casillas y botones (p. ej. al empezar o
+// terminar un borrado, o al marcar "Seleccionar visibles").
+function resyncSelection() {
+  const panel = findStudioPanel();
+  if (!panel) return;
+  const items = getArtifactItems(panel);
+  syncSelection(items, refreshStudyModel(items));
+}
+
+function syncBulkUI() {
+  const container = document.getElementById('nl-filter-panel');
+  if (!container) return;
+  const count = selectedArtifactIds.size;
+  const button = container.querySelector('[data-nl-action="delete-selected"], [data-nl-action="cancel-delete"]');
+  if (button) {
+    const action = bulkDeleteRunning ? 'cancel-delete' : 'delete-selected';
+    const label = bulkDeleteRunning ? 'Cancelar' : 'Borrar (' + count + ')';
+    if (button.getAttribute('data-nl-action') !== action) button.setAttribute('data-nl-action', action);
+    if (button.textContent !== label) button.textContent = label;
+    const disabled = !bulkDeleteRunning && count === 0;
+    if (button.disabled !== disabled) button.disabled = disabled;
+  }
+  container.querySelectorAll('[data-nl-action="select-visible"], [data-nl-action="select-none"]').forEach((other) => {
+    if (other.disabled !== bulkDeleteRunning) other.disabled = bulkDeleteRunning;
+  });
+}
+
+function visibleSelectableIds() {
+  const items = getArtifactItems(findStudioPanel() || document);
+  const ids = [];
+  items.forEach((item) => {
+    const box = item.querySelector(':scope > .nl-select-wrap > .nl-select');
+    if (box && !item.hasAttribute('hidden')) ids.push(box.getAttribute('data-nl-select'));
+  });
+  return ids;
+}
+
+function handleBulkAction(action) {
+  if (action === 'select-visible') {
+    visibleSelectableIds().forEach((id) => selectedArtifactIds.add(id));
+  } else if (action === 'select-none') {
+    selectedArtifactIds.clear();
+  } else {
+    return;
+  }
+  resyncSelection();
 }
 
 function syncFilterUI(container, selectedStudyMap, selectedSourceMap) {
@@ -1662,6 +1750,14 @@ function main() {
 
 document.addEventListener('click', (event) => {
   const target = event.target;
+  const actionEl = target.closest && target.closest('[data-nl-action]');
+  const bulkAction = actionEl ? actionEl.getAttribute('data-nl-action') : '';
+
+  if (bulkAction && bulkAction !== 'clear') {
+    event.preventDefault();
+    if (!actionEl.disabled) handleBulkAction(bulkAction);
+    return;
+  }
 
   if (target.hasAttribute && target.hasAttribute('data-nl-action')) {
     event.preventDefault();

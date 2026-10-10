@@ -1201,3 +1201,55 @@ test('inyectar casillas no realimenta al observer: en reposo no se programan esc
   await new Promise((resolve) => window.setTimeout(resolve, 150));
   assert.equal(frames, 0, 'sin cambios externos no debe haber ningun escaneo pendiente');
 });
+
+// --- Barra de acciones (hito 3) ----------------------------------------------
+const bulkBtn = (window, action) => window.document.querySelector('[data-nl-action="' + action + '"]');
+
+test('la barra de acciones selecciona los visibles, deselecciona y cuenta', async () => {
+  const window = await loadWithMetadata();
+  assert.equal(bulkBtn(window, 'delete-selected').disabled, true, 'sin seleccion no se puede borrar');
+  assert.equal(bulkBtn(window, 'delete-selected').textContent, 'Borrar (0)');
+
+  bulkBtn(window, 'select-visible').click();
+  await settle(window);
+  assert.equal(bulkBtn(window, 'delete-selected').textContent, 'Borrar (6)');
+  assert.equal(bulkBtn(window, 'delete-selected').disabled, false);
+  assert.ok(selectBoxes(window).every((box) => box.checked));
+
+  bulkBtn(window, 'select-none').click();
+  await settle(window);
+  assert.equal(bulkBtn(window, 'delete-selected').textContent, 'Borrar (0)');
+  assert.ok(selectBoxes(window).every((box) => !box.checked));
+});
+
+test('"Seleccionar visibles" solo marca lo que deja pasar el filtro', async () => {
+  const window = await loadWithMetadata();
+  window.document.querySelector('[data-nl-type="audio"]').dispatchEvent(new window.Event('click', { bubbles: true, cancelable: true }));
+  await settle(window);
+
+  bulkBtn(window, 'select-visible').click();
+  await settle(window);
+
+  assert.equal(bulkBtn(window, 'delete-selected').textContent, 'Borrar (4)', 'hay 4 audios visibles');
+});
+
+test('lo seleccionado que un filtro posterior oculta se deselecciona y no se borrara', async () => {
+  const window = await loadWithMetadata();
+  bulkBtn(window, 'select-visible').click();
+  await settle(window);
+  assert.equal(bulkBtn(window, 'delete-selected').textContent, 'Borrar (6)');
+
+  window.document.querySelector('[data-nl-type="quiz"]').dispatchEvent(new window.Event('click', { bubbles: true, cancelable: true }));
+  await settle(window);
+
+  assert.equal(bulkBtn(window, 'delete-selected').textContent, 'Borrar (2)', 'solo quedan seleccionados los 2 tests visibles');
+});
+
+test('"Limpiar" sigue limpiando los filtros y no toca la seleccion', async () => {
+  const window = await loadWithMetadata();
+  window.document.querySelector('[data-nl-type="audio"]').dispatchEvent(new window.Event('click', { bubbles: true, cancelable: true }));
+  await settle(window);
+  window.document.querySelector('[data-nl-action="clear"]').dispatchEvent(new window.Event('click', { bubbles: true, cancelable: true }));
+  await settle(window);
+  assert.equal(window.document.querySelector('[data-nl-type="__all__"]').getAttribute('aria-pressed'), 'true');
+});
