@@ -511,3 +511,63 @@ test('un entero grande (marca de tiempo) en la posicion del tipo no convierte un
 
   assert.deepEqual(parsed.artifacts, []);
 });
+
+// --- Datos reales: lo que rompio la 1.2.2 -----------------------------------
+// Verificado contra el cuaderno real: el informe interactivo (typeCode 11)
+// incrusta ids de otros artefactos en su contenido; y otras respuestas de la
+// web contienen filas [[uuid], texto] que no son la lista de fuentes.
+test('las fuentes de un artefacto salen solo de su campo de fuentes, no de ids incrustados en su contenido', () => {
+  const SRC_A = '0e58e2c4-59dc-4c3f-8ecb-bfa3e246d3bf';
+  const SRC_B = '1afc3ce5-c8ae-41b7-a0cf-fbe77be9bf4a';
+  const SLIDES = '9c1b5b0b-9673-4f50-ab1a-a08a9338adca';
+  const REPORT = '159f69d9-3e6e-4d78-9d92-a5f1acca03e5';
+  const sources = [[[SRC_A], null, 1, '1700000000000'], [[SRC_B], null, 1, '1700000000000']];
+  const embedded = `## Introduccion\n[Embedded element: ${SLIDES}]`;
+  const rows = [
+    [SLIDES, 'Control Táctico', 8, sources, 3],
+    [REPORT, 'Informe Interactivo', 11, sources, 3, null, null, [embedded, [SLIDES]]],
+  ];
+
+  const parsed = parseNotebookBatchResponse(wrap('gArtLc', [rows]));
+  const report = parsed.artifacts.find((a) => a.id === REPORT);
+
+  assert.deepEqual(report.sourceIds, [SRC_A, SRC_B], 'el id del artefacto incrustado no es una fuente');
+});
+
+test('un id de otro artefacto de la misma respuesta nunca cuenta como fuente, aunque aparezca en el campo de fuentes', () => {
+  const SRC_A = '0e58e2c4-59dc-4c3f-8ecb-bfa3e246d3bf';
+  const SLIDES = '9c1b5b0b-9673-4f50-ab1a-a08a9338adca';
+  const REPORT = '159f69d9-3e6e-4d78-9d92-a5f1acca03e5';
+  const rows = [
+    [SLIDES, 'Control Táctico', 8, [[[SRC_A]]], 3],
+    [REPORT, 'Informe Interactivo', 11, [[[SRC_A]], [[SLIDES]]], 3],
+  ];
+
+  const parsed = parseNotebookBatchResponse(wrap('gArtLc', [rows]));
+
+  assert.deepEqual(parsed.artifacts.find((a) => a.id === REPORT).sourceIds, [SRC_A]);
+});
+
+test('los nombres de fuente solo se toman de la lista de fuentes de rLM1Ne, sea cual sea el orden de las respuestas', () => {
+  const SRC_A = '0e58e2c4-59dc-4c3f-8ecb-bfa3e246d3bf';
+  const SRC_B = '1afc3ce5-c8ae-41b7-a0cf-fbe77be9bf4a';
+  const meta = [null, 10, [1700000000, 0], ['bbbbbbbb-0000-4000-8000-000000000000', [1, 2]], 9];
+  const notebook = ['Cuaderno', [[[SRC_A], '_CADENA_DECISION.md', meta], [[SRC_B], '_FOLIO_EXAMEN.md', meta]], 'nb'];
+  // Otra respuesta de la web con filas [[uuid], texto] que NO son fuentes.
+  const noise = [[[SRC_A], '2f72e313-4097-4d34-a1ef-458e04cbc29b'], [[SRC_B], '17_Calculo_y_Dimensionamiento.md']];
+  const frame = (rpc, payload) => ['wrb.fr', rpc, JSON.stringify(payload), null, null, null, 'generic'];
+  const response = (frames) => `)]}'\n\n1\n${JSON.stringify(frames)}`;
+
+  [[frame('hPTbtc', noise), frame('rLM1Ne', notebook)], [frame('rLM1Ne', notebook), frame('hPTbtc', noise)]].forEach((frames) => {
+    const parsed = parseNotebookBatchResponse(response(frames));
+    assert.equal(parsed.sources.get(SRC_A), '_CADENA_DECISION.md');
+    assert.equal(parsed.sources.get(SRC_B), '_FOLIO_EXAMEN.md');
+    assert.equal(parsed.sources.size, 2);
+  });
+});
+
+test('el resultado del parser lista los rpcids vistos (para diagnostico)', () => {
+  const frame = (rpc) => ['wrb.fr', rpc, JSON.stringify([]), null, null, null, 'generic'];
+  const parsed = parseNotebookBatchResponse(`)]}'\n\n1\n${JSON.stringify([frame('rLM1Ne'), frame('gArtLc')])}`);
+  assert.deepEqual(Array.from(parsed.rpcIds).sort(), ['gArtLc', 'rLM1Ne']);
+});

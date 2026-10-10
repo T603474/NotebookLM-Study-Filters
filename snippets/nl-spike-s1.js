@@ -80,6 +80,9 @@
   const result = {
     url: location.hostname + location.pathname.replace(/[0-9a-f-]{36}/i, '<notebook-id>'),
     rpcCounts,
+    // Registro del puente (v1.2.3+): que rpcids ha parseado la extension y
+    // cuantas fuentes/artefactos aporto cada uno.
+    bridgeRpcLog: window.__nlFilterRpcLog || null,
     filenameLeaves: leaves.length,
     sourceRows,
     checkboxCount,

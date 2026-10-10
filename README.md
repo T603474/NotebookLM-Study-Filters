@@ -2,7 +2,7 @@
 
 Extensión de navegador (Manifest V3) para **Microsoft Edge** y **Google Chrome** que añade un panel de filtros dentro de la pestaña **Studio** de [Gemini Notebook](https://notebook.google.com) (antes NotebookLM; algunas cuentas siguen usando [notebooklm.google.com](https://notebooklm.google.com)), permitiendo filtrar las herramientas de estudio generadas (audios, presentaciones, tests, infografías, etc.) **por tipo de contenido** y **por fuente**, sin romper la SPA.
 
-> Versión actual: **1.2.2**
+> Versión actual: **1.2.3**
 
 ---
 
@@ -102,7 +102,7 @@ Si necesitas un host adicional (p. ej. un dominio de Google Workspace), añádel
 El panel "Filtros" tiene esta estructura:
 
 ```
-Filtros · v1.2.2                              Limpiar
+Filtros · v1.2.3                              Limpiar
 ─────────────────────────────────────────────
 TIPO DE CONTENIDO
   [ Buscar guías... ]
@@ -239,7 +239,7 @@ La suite incluye:
 
 jsdom no reproduce todo lo que ocurre en Gemini Notebook real, así que cada versión se comprueba a mano tras recargar la extensión y **cerrar y reabrir** la pestaña:
 
-1. El panel muestra `Filtros · v1.2.2`.
+1. El panel muestra `Filtros · v1.2.3`.
 2. Los contadores de tipo y de fuente coinciden con la lista de herramientas.
 3. Borra una herramienta con su menú ⋮ → eliminar: el contador "Mostrando N de M" y los recuentos de tipo y de fuente bajan sin recargar.
 4. Borra la última herramienta de una fuente: su chip desaparece y el resto se mantiene.
@@ -276,6 +276,7 @@ jsdom no reproduce todo lo que ocurre en Gemini Notebook real, así que cada ver
 
 ## Historial de versiones
 
+- **1.2.3** — Los nombres de fuente solo se toman de la lista de `rLM1Ne` (otras respuestas de la web los pisaban) y las fuentes de un artefacto solo de su campo de fuentes (el informe interactivo incrustaba ids de otros elementos como falsas fuentes). `__nlFilterRpcLog` en la consola muestra qué llamadas ha parseado la extensión.
 - **1.2.2** — Los nombres de fuente llegan de la red (fila `[[uuid], título, …]`) y los artefactos de tipo archivo (10) e informe interactivo (11) se reconocen: chips con el nombre real y recuentos completos.
 - **1.2.1** — Panel DOM-first: chips, contadores y filtros se recalculan al borrar elementos; las fuentes se identifican por UUID (una por chip) y el filtro de fuentes guardado se migra y se poda; el panel se construye con nodos DOM (sin `innerHTML`).
 - **1.1.0** — Renombrado a Gemini Notebook; permisos de host opcionales (`optional_host_permissions`), popup de acceso a sitios y soporte de hosts personalizados.

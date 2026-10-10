@@ -173,6 +173,18 @@
     const sources = new Map();
     const artifacts = [];
     const seenArtifacts = new Set();
+    const rpcIds = new Set();
+    let rpcId = '';
+
+    // Las fuentes de un artefacto van en su campo [3] (verificado con datos
+    // reales). El resto de la fila puede contener ids ajenos: el informe
+    // interactivo incrusta en su contenido los ids de otros artefactos. Solo
+    // si [3] no trae ninguno se mira el resto (formas antiguas de la fila).
+    function artifactSourceIds(row) {
+      const own = (ids) => Array.from(ids).filter((sourceId) => sourceId !== row[0]);
+      const primary = own(extractUuids(row[3]));
+      return primary.length ? primary : own(extractUuids(row.slice(3)));
+    }
 
     function visit(node) {
       if (typeof node === 'string') {
@@ -184,6 +196,15 @@
         if (node && typeof node === 'object') Object.values(node).forEach(visit);
         return;
       }
+      // Marco de batchexecute: ['wrb.fr', <rpcid>, <payload JSON>, ...].
+      if (node[0] === 'wrb.fr' && typeof node[1] === 'string') {
+        const previous = rpcId;
+        rpcId = node[1];
+        rpcIds.add(rpcId);
+        node.forEach(visit);
+        rpcId = previous;
+        return;
+      }
       if (isArtifactRow(node)) {
         if (!seenArtifacts.has(node[0])) {
           seenArtifacts.add(node[0]);
@@ -191,15 +212,22 @@
             id: node[0],
             title: node[1],
             typeCode: node[2],
-            sourceIds: Array.from(extractUuids(node.slice(3)))
-              .filter((sourceId) => sourceId !== node[0]),
+            sourceIds: artifactSourceIds(node),
           });
         }
         return;
       }
-      const wrapped = wrappedSourceFromRow(node);
-      if (wrapped) sources.set(wrapped.id, wrapped.title);
-      else if (isSourceRow(node)) sources.set(node[0], sourceTitleFromRow(node));
+      // Lista de fuentes del cuaderno: [[[uuid], titulo, ...], ...]. Solo la
+      // respuesta rLM1Ne la define; otras respuestas de la web traen filas
+      // [[uuid], texto] que no son fuentes y pisarian los nombres.
+      if (rpcId === 'rLM1Ne' && node.length > 0 && node.every((row) => wrappedSourceFromRow(row))) {
+        node.forEach((row) => {
+          const wrapped = wrappedSourceFromRow(row);
+          sources.set(wrapped.id, wrapped.title);
+        });
+        return;
+      }
+      if (isSourceRow(node)) sources.set(node[0], sourceTitleFromRow(node));
       node.forEach(visit);
     }
 
@@ -213,7 +241,13 @@
         if (parsed) visit(parsed);
       });
 
-    return { sources, artifacts };
+    // Un id de otro artefacto de esta misma respuesta nunca es una fuente.
+    const artifactIds = new Set(artifacts.map((artifact) => artifact.id));
+    artifacts.forEach((artifact) => {
+      artifact.sourceIds = artifact.sourceIds.filter((sourceId) => !artifactIds.has(sourceId));
+    });
+
+    return { sources, artifacts, rpcIds: Array.from(rpcIds) };
   }
 
   function buildArtifactSourceOptions(artifacts, sourcesById) {

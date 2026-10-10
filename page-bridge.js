@@ -8,6 +8,18 @@
 
   function emitMetadata(responseText) {
     const parsed = core.parseNotebookBatchResponse(responseText);
+    // Diagnostico: __nlFilterRpcLog (en la consola, contexto "top") muestra que
+    // llamadas batchexecute ha visto la pagina y cuantas fuentes/artefactos
+    // aporto cada una. Nunca debe impedir que se emitan los metadatos.
+    try {
+      const log = (window.__nlFilterRpcLog = window.__nlFilterRpcLog || {});
+      (parsed.rpcIds || []).forEach((id) => {
+        const entry = log[id] || (log[id] = { calls: 0, sources: 0, artifacts: 0 });
+        entry.calls += 1;
+        entry.sources += parsed.sources.size;
+        entry.artifacts += parsed.artifacts.length;
+      });
+    } catch {}
     if (!parsed.artifacts.length && !parsed.sources.size) return;
     metadataSnapshot = core.mergeMetadataSnapshot(metadataSnapshot, {
       artifacts: parsed.artifacts,
